@@ -6,6 +6,7 @@ const PUBLIC_ROUTES = [
   '/api/auth/login',
   '/api/public',
   '/api/orders',
+  '/api/swagger',
 ];
 
 export function middleware(request: NextRequest) {

@@ -1,0 +1,554 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Burkina Shop — API",
+    "description": "API REST du backend Next.js pour la gestion de boutiques en ligne.\n\n**Authentification** : Bearer JWT — connectez-vous via `POST /api/auth/login` puis cliquez **Authorize** en haut.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "http://localhost:4000", "description": "Développement local" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "ApiOk": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {}
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "message": { "type": "string" }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "_id":         { "type": "string" },
+          "name":        { "type": "string" },
+          "slug":        { "type": "string" },
+          "phone":       { "type": "string" },
+          "description": { "type": "string" },
+          "logo":        { "type": "string" },
+          "address":     { "type": "string" },
+          "coverColor":  { "type": "string" },
+          "role":        { "type": "string", "enum": ["admin", "user"] }
+        }
+      },
+      "Category": {
+        "type": "object",
+        "properties": {
+          "_id":         { "type": "string" },
+          "shopId":      { "type": "string" },
+          "name":        { "type": "string" },
+          "icon":        { "type": "string" },
+          "color":       { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "_id":           { "type": "string" },
+          "shopId":        { "type": "string" },
+          "categoryId":    { "type": "string" },
+          "name":          { "type": "string" },
+          "price":         { "type": "number" },
+          "originalPrice": { "type": "number" },
+          "promotion":     { "type": "number" },
+          "image":         { "type": "string" },
+          "unit":          { "type": "string" },
+          "stock":         { "type": "number" },
+          "inStock":       { "type": "boolean" }
+        }
+      },
+      "Annonce": {
+        "type": "object",
+        "properties": {
+          "_id":       { "type": "string" },
+          "shopId":    { "type": "string" },
+          "titre":     { "type": "string" },
+          "message":   { "type": "string" },
+          "type":      { "type": "string", "enum": ["promo", "info", "alerte", "evenement"] },
+          "emoji":     { "type": "string" },
+          "dateDebut": { "type": "string", "format": "date" },
+          "dateFin":   { "type": "string", "format": "date" },
+          "active":    { "type": "boolean" },
+          "epinglee":  { "type": "boolean" }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "_id":           { "type": "string" },
+          "shopId":        { "type": "string" },
+          "customerName":  { "type": "string" },
+          "customerPhone": { "type": "string" },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "productId": { "type": "string" },
+                "name":      { "type": "string" },
+                "quantity":  { "type": "number" },
+                "price":     { "type": "number" }
+              }
+            }
+          },
+          "total":        { "type": "number" },
+          "status":       { "type": "string", "enum": ["pending", "confirmed", "cancelled"] },
+          "whatsappSent": { "type": "boolean" },
+          "note":         { "type": "string" }
+        }
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "tags": [
+    { "name": "Auth",       "description": "Authentification & profil" },
+    { "name": "Catégories", "description": "Gestion des catégories (auth)" },
+    { "name": "Produits",   "description": "Gestion des produits (auth)" },
+    { "name": "Annonces",   "description": "Gestion des annonces (auth)" },
+    { "name": "Commandes",  "description": "Commandes (auth GET / public POST)" },
+    { "name": "Public",     "description": "Vitrine publique (sans auth)" }
+  ],
+  "paths": {
+    "/api/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Créer un compte boutique",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "phone", "password"],
+                "properties": {
+                  "name":        { "type": "string",  "example": "Boutique Kaboré" },
+                  "phone":       { "type": "string",  "example": "22677938688" },
+                  "password":    { "type": "string",  "example": "password123" },
+                  "description": { "type": "string" },
+                  "logo":        { "type": "string" },
+                  "address":     { "type": "string" },
+                  "coverColor":  { "type": "string",  "example": "#a04343" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Compte créé", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiOk" } } } },
+          "400": { "description": "Données invalides" },
+          "409": { "description": "Numéro déjà utilisé" }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Se connecter (obtenir le JWT)",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["phone", "password"],
+                "properties": {
+                  "phone":    { "type": "string", "example": "22677938688" },
+                  "password": { "type": "string", "example": "password123" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Connexion réussie — retourne user + token" },
+          "401": { "description": "Identifiants invalides" }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Profil de l'utilisateur connecté",
+        "responses": {
+          "200": { "description": "Profil utilisateur", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiOk" } } } },
+          "401": { "description": "Non authentifié" }
+        }
+      },
+      "put": {
+        "tags": ["Auth"],
+        "summary": "Mettre à jour le profil",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name":        { "type": "string" },
+                  "description": { "type": "string" },
+                  "logo":        { "type": "string" },
+                  "address":     { "type": "string" },
+                  "coverColor":  { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Profil mis à jour" },
+          "400": { "description": "Données invalides" },
+          "401": { "description": "Non authentifié" }
+        }
+      }
+    },
+    "/api/categories": {
+      "get": {
+        "tags": ["Catégories"],
+        "summary": "Liste des catégories de la boutique",
+        "responses": {
+          "200": { "description": "Liste des catégories", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiOk" } } } },
+          "401": { "description": "Non authentifié" }
+        }
+      },
+      "post": {
+        "tags": ["Catégories"],
+        "summary": "Créer une catégorie",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name":        { "type": "string",  "example": "Alimentation" },
+                  "icon":        { "type": "string",  "example": "restaurant" },
+                  "color":       { "type": "string",  "example": "#4CAF50" },
+                  "description": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Catégorie créée" },
+          "400": { "description": "Données invalides" },
+          "401": { "description": "Non authentifié" }
+        }
+      }
+    },
+    "/api/categories/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "ID MongoDB de la catégorie" }
+      ],
+      "get": {
+        "tags": ["Catégories"],
+        "summary": "Détails d'une catégorie",
+        "responses": {
+          "200": { "description": "Catégorie trouvée" },
+          "401": { "description": "Non authentifié" },
+          "404": { "description": "Introuvable" }
+        }
+      },
+      "put": {
+        "tags": ["Catégories"],
+        "summary": "Modifier une catégorie",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Category" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Catégorie mise à jour" },
+          "401": { "description": "Non authentifié" },
+          "404": { "description": "Introuvable" }
+        }
+      },
+      "delete": {
+        "tags": ["Catégories"],
+        "summary": "Supprimer une catégorie (et ses produits)",
+        "responses": {
+          "200": { "description": "Supprimée" },
+          "401": { "description": "Non authentifié" },
+          "404": { "description": "Introuvable" }
+        }
+      }
+    },
+    "/api/products": {
+      "get": {
+        "tags": ["Produits"],
+        "summary": "Liste des produits de la boutique",
+        "parameters": [
+          { "name": "categoryId", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Filtrer par catégorie" }
+        ],
+        "responses": {
+          "200": { "description": "Liste des produits" },
+          "401": { "description": "Non authentifié" }
+        }
+      },
+      "post": {
+        "tags": ["Produits"],
+        "summary": "Créer un produit",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "price", "categoryId"],
+                "properties": {
+                  "name":          { "type": "string",  "example": "Tissu wax" },
+                  "categoryId":    { "type": "string" },
+                  "price":         { "type": "number",  "example": 8500 },
+                  "originalPrice": { "type": "number" },
+                  "promotion":     { "type": "number",  "example": 10 },
+                  "image":         { "type": "string" },
+                  "unit":          { "type": "string",  "example": "pièce" },
+                  "stock":         { "type": "number" },
+                  "inStock":       { "type": "boolean", "example": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Produit créé" },
+          "400": { "description": "Données invalides" },
+          "401": { "description": "Non authentifié" }
+        }
+      }
+    },
+    "/api/products/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "ID MongoDB du produit" }
+      ],
+      "get": {
+        "tags": ["Produits"],
+        "summary": "Détails d'un produit",
+        "responses": {
+          "200": { "description": "Produit trouvé" },
+          "401": { "description": "Non authentifié" },
+          "404": { "description": "Introuvable" }
+        }
+      },
+      "put": {
+        "tags": ["Produits"],
+        "summary": "Modifier un produit",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Product" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Produit mis à jour" },
+          "401": { "description": "Non authentifié" },
+          "404": { "description": "Introuvable" }
+        }
+      },
+      "delete": {
+        "tags": ["Produits"],
+        "summary": "Supprimer un produit",
+        "responses": {
+          "200": { "description": "Supprimé" },
+          "401": { "description": "Non authentifié" },
+          "404": { "description": "Introuvable" }
+        }
+      }
+    },
+    "/api/annonces": {
+      "get": {
+        "tags": ["Annonces"],
+        "summary": "Liste des annonces de la boutique",
+        "responses": {
+          "200": { "description": "Liste des annonces" },
+          "401": { "description": "Non authentifié" }
+        }
+      },
+      "post": {
+        "tags": ["Annonces"],
+        "summary": "Créer une annonce",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["titre", "message", "type", "dateDebut"],
+                "properties": {
+                  "titre":     { "type": "string",  "example": "Promo spéciale" },
+                  "message":   { "type": "string" },
+                  "type":      { "type": "string",  "enum": ["promo", "info", "alerte", "evenement"] },
+                  "emoji":     { "type": "string",  "example": "🎉" },
+                  "dateDebut": { "type": "string",  "format": "date", "example": "2025-01-01" },
+                  "dateFin":   { "type": "string",  "format": "date" },
+                  "active":    { "type": "boolean", "example": true },
+                  "epinglee":  { "type": "boolean", "example": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Annonce créée" },
+          "400": { "description": "Données invalides" },
+          "401": { "description": "Non authentifié" }
+        }
+      }
+    },
+    "/api/annonces/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["Annonces"],
+        "summary": "Détails d'une annonce",
+        "responses": { "200": { "description": "Annonce trouvée" }, "404": { "description": "Introuvable" } }
+      },
+      "put": {
+        "tags": ["Annonces"],
+        "summary": "Modifier une annonce",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Annonce" } } }
+        },
+        "responses": { "200": { "description": "Mise à jour" }, "401": { "description": "Non authentifié" } }
+      },
+      "delete": {
+        "tags": ["Annonces"],
+        "summary": "Supprimer une annonce",
+        "responses": { "200": { "description": "Supprimée" }, "401": { "description": "Non authentifié" } }
+      }
+    },
+    "/api/annonces/{id}/toggle-active": {
+      "patch": {
+        "tags": ["Annonces"],
+        "summary": "Activer / désactiver une annonce",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "État modifié" }, "401": { "description": "Non authentifié" } }
+      }
+    },
+    "/api/annonces/{id}/toggle-epinglee": {
+      "patch": {
+        "tags": ["Annonces"],
+        "summary": "Épingler / désépingler une annonce",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "État modifié" }, "401": { "description": "Non authentifié" } }
+      }
+    },
+    "/api/orders": {
+      "get": {
+        "tags": ["Commandes"],
+        "summary": "Liste des commandes de la boutique (auth)",
+        "responses": {
+          "200": { "description": "Liste des commandes" },
+          "401": { "description": "Non authentifié" }
+        }
+      },
+      "post": {
+        "tags": ["Commandes"],
+        "summary": "Passer une commande depuis la vitrine publique (sans auth)",
+        "security": [],
+        "parameters": [
+          { "name": "shopSlug", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Slug de la boutique" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["customerName", "customerPhone", "items", "total"],
+                "properties": {
+                  "customerName":  { "type": "string",  "example": "Jean Dupont" },
+                  "customerPhone": { "type": "string",  "example": "22670000000" },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "productId": { "type": "string" },
+                        "name":      { "type": "string" },
+                        "quantity":  { "type": "number" },
+                        "price":     { "type": "number" }
+                      }
+                    }
+                  },
+                  "total":        { "type": "number", "example": 25000 },
+                  "whatsappSent": { "type": "boolean" },
+                  "note":         { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Commande créée" },
+          "400": { "description": "Données invalides ou shopSlug manquant" },
+          "404": { "description": "Boutique introuvable" }
+        }
+      }
+    },
+    "/api/public/shop/{slug}": {
+      "get": {
+        "tags": ["Public"],
+        "summary": "Données publiques d'une boutique (vitrine)",
+        "security": [],
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" }, "example": "kabore-et-fils", "description": "Slug unique de la boutique" }
+        ],
+        "responses": {
+          "200": {
+            "description": "company + categories + products + announcements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "company":       { "$ref": "#/components/schemas/User" },
+                        "categories":    { "type": "array", "items": { "$ref": "#/components/schemas/Category" } },
+                        "products":      { "type": "array", "items": { "$ref": "#/components/schemas/Product" } },
+                        "announcements": { "type": "array", "items": { "$ref": "#/components/schemas/Annonce" } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Boutique introuvable" }
+        }
+      }
+    }
+  }
+}

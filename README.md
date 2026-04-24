@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Backend Gestion Boutique
 
 Backend Next.js (App Router) généré à partir du projet Angular `gestion-boutique`.
@@ -245,3 +246,6 @@ Toutes les réponses suivent ce format :
 
 ### Order
 `shopId` · `customerName` · `customerPhone` · `items[]` · `total` · `status` · `whatsappSent` · `note?`
+=======
+# easyOrder-backend
+>>>>>>> dfda50bfe2976c8d0be62e6b2f77ea038be6aa48

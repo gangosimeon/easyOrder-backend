@@ -22,3 +22,11 @@ lerna-debug.log*
 # temp directory
 .temp
 .tmp
+
+# Next.js
+.next/
+out/
+
+# Environment variables
+.env.local
+.env.*

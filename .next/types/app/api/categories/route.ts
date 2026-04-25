@@ -1,8 +1,8 @@
-// File: C:\Users\simeon.g\Desktop\Taches\PersonnelCodes\burkina-shop-angular20\backend-gestion-boutique\app\api\public\shop\[slug]\route.ts
-import * as entry from '../../../../../../../app/api/public/shop/[slug]/route.js'
+// File: C:\Users\simeon.g\Desktop\Taches\PersonnelCodes\burkina-shop-angular20\backend-gestion-boutique\app\api\categories\route.ts
+import * as entry from '../../../../../app/api/categories/route.js'
 import type { NextRequest } from 'next/server.js'
 
-type TEntry = typeof import('../../../../../../../app/api/public/shop/[slug]/route.js')
+type TEntry = typeof import('../../../../../app/api/categories/route.js')
 
 // Check that the entry is a valid entry
 checkFields<Diff<{

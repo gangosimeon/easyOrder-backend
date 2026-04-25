@@ -30,3 +30,7 @@ out/
 # Environment variables
 .env.local
 .env.*
+# Cache
+node_modules/
+*.pack.gz
+*.pack.gz.old

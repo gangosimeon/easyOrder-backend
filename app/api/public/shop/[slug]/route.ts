@@ -24,6 +24,7 @@ export async function GET(
     ]);
 
     const company = {
+      id:          shopId,
       name:        shop.name,
       slug:        shop.slug,
       phone:       shop.phone,

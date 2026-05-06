@@ -20,7 +20,7 @@ const productSchema = new Schema<IProduct>(
   {
     shopId:        { type: Schema.Types.ObjectId, ref: 'User', required: true },
     categoryId:    { type: Schema.Types.ObjectId, ref: 'Category', required: true },
-    name:          { type: String, required: true, trim: true },
+    name:          { type: String, default: '', trim: true },
     price:         { type: Number, required: true, min: 0 },
     originalPrice: { type: Number, min: 0 },
     promotion:     { type: Number, min: 0, max: 100 },

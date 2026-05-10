@@ -6,6 +6,7 @@
     "version": "1.0.0"
   },
   "servers": [
+    { "url": "https://easyorder-backend-wnku.onrender.com", "description": "Production (Render)" },
     { "url": "http://localhost:4000", "description": "Développement local" }
   ],
   "components": {
@@ -87,6 +88,20 @@
           "epinglee":  { "type": "boolean" }
         }
       },
+      "AdminAnnouncement": {
+        "type": "object",
+        "properties": {
+          "_id":         { "type": "string" },
+          "title":       { "type": "string",  "example": "Maintenance prévue" },
+          "content":     { "type": "string",  "example": "La plateforme sera indisponible le 15/06 de 2h à 4h." },
+          "type":        { "type": "string",  "enum": ["info", "warning", "success", "urgent"] },
+          "active":      { "type": "boolean", "example": true },
+          "targetShops": { "type": "array",   "items": { "type": "string" }, "description": "IDs boutiques ciblées — vide = toutes" },
+          "expireAt":    { "type": "string",  "format": "date-time", "nullable": true },
+          "createdBy":   { "type": "string" },
+          "createdAt":   { "type": "string",  "format": "date-time" }
+        }
+      },
       "Order": {
         "type": "object",
         "properties": {
@@ -116,12 +131,15 @@
   },
   "security": [{ "bearerAuth": [] }],
   "tags": [
-    { "name": "Auth",       "description": "Authentification & profil" },
-    { "name": "Catégories", "description": "Gestion des catégories (auth)" },
-    { "name": "Produits",   "description": "Gestion des produits (auth)" },
-    { "name": "Annonces",   "description": "Gestion des annonces (auth)" },
-    { "name": "Commandes",  "description": "Commandes (auth GET / public POST)" },
-    { "name": "Public",     "description": "Vitrine publique (sans auth)" }
+    { "name": "Auth",               "description": "Authentification & profil" },
+    { "name": "Catégories",         "description": "Gestion des catégories (auth)" },
+    { "name": "Produits",           "description": "Gestion des produits (auth)" },
+    { "name": "Annonces",           "description": "Gestion des annonces boutique (auth)" },
+    { "name": "Commandes",          "description": "Commandes (auth GET / public POST)" },
+    { "name": "Public",             "description": "Vitrine publique (sans auth)" },
+    { "name": "Admin — Boutiques",  "description": "Gestion admin des boutiques (rôle admin requis)" },
+    { "name": "Admin — Annonces",   "description": "Annonces administrateur globales (rôle admin requis)" },
+    { "name": "Shop — Annonces",    "description": "Annonces admin visibles par la boutique connectée" }
   ],
   "paths": {
     "/api/auth/register": {
@@ -512,6 +530,197 @@
           "201": { "description": "Commande créée" },
           "400": { "description": "Données invalides ou shopSlug manquant" },
           "404": { "description": "Boutique introuvable" }
+        }
+      }
+    },
+    "/api/admin/shops": {
+      "get": {
+        "tags": ["Admin — Boutiques"],
+        "summary": "Liste paginée des boutiques (admin)",
+        "parameters": [
+          { "name": "search",    "in": "query", "schema": { "type": "string" },  "description": "Recherche nom / slug / téléphone" },
+          { "name": "page",      "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit",     "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "sortField", "in": "query", "schema": { "type": "string",  "default": "createdAt" } },
+          { "name": "sortDir",   "in": "query", "schema": { "type": "string",  "enum": ["asc", "desc"], "default": "desc" } },
+          { "name": "status",    "in": "query", "schema": { "type": "string",  "enum": ["all", "active", "inactive"], "default": "all" } }
+        ],
+        "responses": {
+          "200": { "description": "{ shops[], pagination }" },
+          "401": { "description": "Non authentifié" },
+          "403": { "description": "Accès refusé (admin requis)" }
+        }
+      }
+    },
+    "/api/admin/shops/stats": {
+      "get": {
+        "tags": ["Admin — Boutiques"],
+        "summary": "Statistiques globales de la plateforme (admin)",
+        "responses": {
+          "200": {
+            "description": "totalShops, activeShops, inactiveShops, totalProducts, monthlyGrowth, topShops[]",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiOk" } } }
+          },
+          "403": { "description": "Accès refusé" }
+        }
+      }
+    },
+    "/api/admin/shops/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "ID MongoDB de la boutique" }
+      ],
+      "get": {
+        "tags": ["Admin — Boutiques"],
+        "summary": "Détails complets d'une boutique (admin)",
+        "responses": {
+          "200": { "description": "Boutique + productCount + categoryCount + orderCount + recentProducts" },
+          "403": { "description": "Accès refusé" },
+          "404": { "description": "Boutique introuvable" }
+        }
+      }
+    },
+    "/api/admin/shops/{id}/stats": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["Admin — Boutiques"],
+        "summary": "Statistiques d'une boutique spécifique (admin)",
+        "responses": {
+          "200": { "description": "productCount, orderCount, categoryCount, revenue" },
+          "403": { "description": "Accès refusé" },
+          "404": { "description": "Boutique introuvable" }
+        }
+      }
+    },
+    "/api/admin/announcements": {
+      "get": {
+        "tags": ["Admin — Annonces"],
+        "summary": "Liste paginée des annonces admin",
+        "parameters": [
+          { "name": "page",  "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": { "description": "{ announcements[], pagination }" },
+          "403": { "description": "Accès refusé" }
+        }
+      },
+      "post": {
+        "tags": ["Admin — Annonces"],
+        "summary": "Créer une annonce admin",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["title", "content", "type"],
+                "properties": {
+                  "title":       { "type": "string",  "example": "Nouvelle fonctionnalité" },
+                  "content":     { "type": "string",  "example": "Vous pouvez désormais exporter vos commandes en CSV." },
+                  "type":        { "type": "string",  "enum": ["info", "warning", "success", "urgent"], "example": "info" },
+                  "active":      { "type": "boolean", "example": true },
+                  "targetShops": { "type": "array",   "items": { "type": "string" }, "description": "Laisser vide pour cibler toutes les boutiques" },
+                  "expireAt":    { "type": "string",  "format": "date-time", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Annonce créée", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminAnnouncement" } } } },
+          "400": { "description": "Données invalides" },
+          "403": { "description": "Accès refusé" }
+        }
+      }
+    },
+    "/api/admin/announcements/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "ID MongoDB de l'annonce" }
+      ],
+      "get": {
+        "tags": ["Admin — Annonces"],
+        "summary": "Détails d'une annonce admin",
+        "responses": {
+          "200": { "description": "Annonce trouvée", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminAnnouncement" } } } },
+          "403": { "description": "Accès refusé" },
+          "404": { "description": "Introuvable" }
+        }
+      },
+      "put": {
+        "tags": ["Admin — Annonces"],
+        "summary": "Modifier une annonce admin",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title":       { "type": "string" },
+                  "content":     { "type": "string" },
+                  "type":        { "type": "string", "enum": ["info", "warning", "success", "urgent"] },
+                  "active":      { "type": "boolean" },
+                  "targetShops": { "type": "array", "items": { "type": "string" } },
+                  "expireAt":    { "type": "string", "format": "date-time", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Annonce mise à jour" },
+          "400": { "description": "Données invalides" },
+          "403": { "description": "Accès refusé" },
+          "404": { "description": "Introuvable" }
+        }
+      },
+      "delete": {
+        "tags": ["Admin — Annonces"],
+        "summary": "Supprimer une annonce admin",
+        "responses": {
+          "200": { "description": "Supprimée" },
+          "403": { "description": "Accès refusé" },
+          "404": { "description": "Introuvable" }
+        }
+      }
+    },
+    "/api/admin/announcements/{id}/toggle": {
+      "patch": {
+        "tags": ["Admin — Annonces"],
+        "summary": "Activer / désactiver une annonce admin",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "État modifié — retourne l'annonce mise à jour" },
+          "403": { "description": "Accès refusé" },
+          "404": { "description": "Introuvable" }
+        }
+      }
+    },
+    "/api/shop/announcements": {
+      "get": {
+        "tags": ["Shop — Annonces"],
+        "summary": "Annonces admin actives pour la boutique connectée",
+        "description": "Retourne les annonces globales **et** celles ciblant spécifiquement la boutique, non expirées.",
+        "responses": {
+          "200": {
+            "description": "Liste des annonces actives",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/AdminAnnouncement" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Non authentifié" }
         }
       }
     },

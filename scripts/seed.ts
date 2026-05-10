@@ -7,6 +7,14 @@ dotenv.config({ path: '.env.local' });
 const MONGODB_URI = process.env.MONGODB_URI as string;
 if (!MONGODB_URI) throw new Error('MONGODB_URI manquant dans .env.local');
 
+async function confirm(question: string): Promise<boolean> {
+  const readline = await import('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise(resolve => {
+    rl.question(question, ans => { rl.close(); resolve(ans.trim().toLowerCase() === 'o'); });
+  });
+}
+
 async function seed() {
   await mongoose.connect(MONGODB_URI);
   console.log('✅ Connecté à MongoDB');
@@ -15,6 +23,12 @@ async function seed() {
   const Category  = (await import('../models/category.model')).default;
   const Product   = (await import('../models/product.model')).default;
   const Annonce   = (await import('../models/annonce.model')).default;
+
+  const userCount = await User.countDocuments();
+  if (userCount > 0) {
+    const ok = await confirm(`\n⚠️  ATTENTION : ${userCount} utilisateur(s) existant(s) détecté(s).\n   Cette opération va EFFACER toutes les données. Continuer ? (o/N) : `);
+    if (!ok) { console.log('❌ Seed annulé.'); await mongoose.disconnect(); return; }
+  }
 
   await Promise.all([
     User.deleteMany({}),

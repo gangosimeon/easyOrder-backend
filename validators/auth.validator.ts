@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const registerSchema = z.object({
   name:        z.string().min(2, 'Le nom doit avoir au moins 2 caractères').max(100),
-  phone:       z.string().min(8, 'Numéro de téléphone invalide').max(20),
+  phone:       z.string().min(8, 'Numéro de téléphone invalide').max(20).transform(phone => phone.replace(/\+/g, '')),
   password:    z.string().min(6, 'Le mot de passe doit avoir au moins 6 caractères'),
   description: z.string().max(500).default(''),
   logo:        z.string().default('🏪'),
@@ -11,7 +11,7 @@ export const registerSchema = z.object({
 });
 
 export const loginSchema = z.object({
-  phone:    z.string().min(1, 'Le numéro est requis'),
+  phone:    z.string().min(1, 'Le numéro est requis').transform(phone => phone.replace(/\+/g, '')),
   password: z.string().min(1, 'Le mot de passe est requis'),
 });
 

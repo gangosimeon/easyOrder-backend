@@ -15,7 +15,7 @@ const orderItemSchema = z.object({
 
 export const createOrderSchema = z.object({
   customerName:  z.string().min(1, 'Nom client requis').max(100),
-  customerPhone: z.string().min(8, 'Numéro invalide').max(20),
+  customerPhone: z.string().min(8, 'Numéro invalide').max(20).transform(phone => phone.replace(/\+/g, '')),
   items:         z.array(orderItemSchema).min(1, 'Au moins un article requis'),
   total:         z.number().min(0),
   note:          z.string().max(500).optional(),

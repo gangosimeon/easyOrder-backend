@@ -19,6 +19,7 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
     if (e.status === 401) return res.unauthorized(e.message);
+    console.error('[POST /api/auth/login]', err);
     return res.serverError();
   }
 }

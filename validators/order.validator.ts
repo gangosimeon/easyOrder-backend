@@ -2,12 +2,16 @@ import { z } from 'zod';
 
 const orderItemSchema = z.object({
   productId:   z.string().min(1, 'productId requis'),
-  productName: z.string().min(1),
+  productName: z.string().min(1).optional(),
+  name:        z.string().min(1).optional(),
   price:       z.number().min(0),
   quantity:    z.number().min(1),
   image:       z.string().default(''),
   unit:        z.string().default('pièce'),
-});
+}).transform(({ name, productName, ...rest }) => ({
+  ...rest,
+  productName: productName ?? name ?? '',
+})).refine(item => item.productName.length > 0, { message: 'productName ou name requis' });
 
 export const createOrderSchema = z.object({
   customerName:  z.string().min(1, 'Nom client requis').max(100),

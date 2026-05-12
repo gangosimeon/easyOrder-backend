@@ -102,6 +102,19 @@
           "createdAt":   { "type": "string",  "format": "date-time" }
         }
       },
+      "OrderItem": {
+        "type": "object",
+        "required": ["productId", "price", "quantity"],
+        "properties": {
+          "productId":   { "type": "string",  "example": "6a0074c6fedddbebd57b4c92" },
+          "name":        { "type": "string",  "example": "Gombo sec", "description": "Alias de productName — l'un ou l'autre est requis" },
+          "productName": { "type": "string",  "example": "Gombo sec", "description": "Alias de name — l'un ou l'autre est requis" },
+          "price":       { "type": "number",  "example": 500 },
+          "quantity":    { "type": "number",  "example": 2, "minimum": 1 },
+          "image":       { "type": "string",  "example": "" },
+          "unit":        { "type": "string",  "example": "pièce" }
+        }
+      },
       "Order": {
         "type": "object",
         "properties": {
@@ -109,22 +122,12 @@
           "shopId":        { "type": "string" },
           "customerName":  { "type": "string" },
           "customerPhone": { "type": "string" },
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "productId": { "type": "string" },
-                "name":      { "type": "string" },
-                "quantity":  { "type": "number" },
-                "price":     { "type": "number" }
-              }
-            }
-          },
-          "total":        { "type": "number" },
-          "status":       { "type": "string", "enum": ["pending", "confirmed", "cancelled"] },
-          "whatsappSent": { "type": "boolean" },
-          "note":         { "type": "string" }
+          "items":         { "type": "array", "items": { "$ref": "#/components/schemas/OrderItem" } },
+          "total":         { "type": "number" },
+          "status":        { "type": "string", "enum": ["pending", "confirmed", "delivered", "cancelled"] },
+          "whatsappSent":  { "type": "boolean" },
+          "note":          { "type": "string" },
+          "createdAt":     { "type": "string", "format": "date-time" }
         }
       }
     }
@@ -508,19 +511,16 @@
                   "customerPhone": { "type": "string",  "example": "22670000000" },
                   "items": {
                     "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "productId": { "type": "string" },
-                        "name":      { "type": "string" },
-                        "quantity":  { "type": "number" },
-                        "price":     { "type": "number" }
-                      }
-                    }
+                    "minItems": 1,
+                    "description": "Au moins un article requis",
+                    "items": { "$ref": "#/components/schemas/OrderItem" },
+                    "example": [
+                      { "productId": "6a0074c6fedddbebd57b4c92", "name": "Gombo sec", "price": 500, "quantity": 2 }
+                    ]
                   },
-                  "total":        { "type": "number", "example": 25000 },
-                  "whatsappSent": { "type": "boolean" },
-                  "note":         { "type": "string" }
+                  "total":        { "type": "number", "example": 1000 },
+                  "whatsappSent": { "type": "boolean", "example": true },
+                  "note":         { "type": "string", "example": "Livrer avant midi" }
                 }
               }
             }

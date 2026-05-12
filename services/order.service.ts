@@ -49,6 +49,7 @@ export async function updateOrderStatus(
   shopId: string,
   status: 'pending' | 'confirmed' | 'delivered' | 'cancelled'
 ) {
+  console.log('Updating order status:', id, status);
   const order = await orderRepository.updateStatus(id, status);
   if (!order) throw Object.assign(new Error('Commande introuvable'), { status: 404 });
   if (order.shopId.toString() !== shopId) throw Object.assign(new Error('Accès non autorisé'), { status: 403 });

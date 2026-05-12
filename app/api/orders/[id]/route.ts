@@ -35,7 +35,7 @@ export async function PATCH(
 
     // Convert MongoDB ObjectId to string for frontend
     const responseOrder = {
-      ...updatedOrder.toObject(),
+      ...updatedOrder.toObject({ virtuals: false }),
       _id: updatedOrder._id.toString(),
       shopId: updatedOrder.shopId.toString(),
     };

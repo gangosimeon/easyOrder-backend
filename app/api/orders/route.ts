@@ -27,7 +27,7 @@ export async function POST(req: Request) {
       return res.badRequest('Données invalides', parsed.error.flatten().fieldErrors);
     }
 
-    const { searchParams } = new URL(req.url);
+    const { searchParams } = new URL(req.url, 'http://localhost');
     const shopSlug = searchParams.get('shopSlug');
 
     if (!shopSlug) {
@@ -40,7 +40,8 @@ export async function POST(req: Request) {
 
     const order = await createOrder(shop._id.toString(), parsed.data);
     return res.created(order);
-  } catch {
+  } catch (err) {
+    console.error('[POST /api/orders]', err);
     return res.serverError();
   }
 }

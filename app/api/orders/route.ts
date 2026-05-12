@@ -54,6 +54,13 @@ export async function GET(req: Request) {
       });
     }
 
+    // Convert MongoDB ObjectId to string for frontend
+    orders = orders.map(order => ({
+      ...order.toObject(),
+      _id: order._id.toString(),
+      shopId: order.shopId.toString(),
+    }));
+
     return res.ok({
       data: orders,
       pagination: {

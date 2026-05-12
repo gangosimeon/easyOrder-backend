@@ -33,7 +33,14 @@ export async function PATCH(
       route: `/api/orders/${id}`,
     });
 
-    return res.ok(updatedOrder);
+    // Convert MongoDB ObjectId to string for frontend
+    const responseOrder = {
+      ...updatedOrder.toObject(),
+      _id: updatedOrder._id.toString(),
+      shopId: updatedOrder.shopId.toString(),
+    };
+
+    return res.ok(responseOrder);
   } catch (err: unknown) {
     const e = err as { message?: string; status?: number };
     if (e.message === 'Non authentifié') {

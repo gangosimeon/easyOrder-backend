@@ -2,8 +2,8 @@ import { connectDB } from '@/lib/db';
 import { requireAuthUser } from '@/lib/auth';
 import { Logger } from '@/lib/logger';
 import * as res from '@/lib/api-response';
-import { createOrderSchema } from '@/validators/order.validator';
-import { getOrdersByShopPaginated, countOrders, countOrdersByShop, createOrder } from '@/services/order.service';
+import { createOrderSchema, updateOrderStatusSchema } from '@/validators/order.validator';
+import { getOrdersByShopPaginated, countOrders, countOrdersByShop, createOrder, updateOrderStatus } from '@/services/order.service';
 import User from '@/models/user.model';
 
 export async function GET(req: Request) {

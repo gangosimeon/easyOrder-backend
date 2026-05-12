@@ -533,6 +533,48 @@
         }
       }
     },
+    "/api/orders/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "ID MongoDB de la commande" }
+      ],
+      "patch": {
+        "tags": ["Commandes"],
+        "summary": "Mettre à jour le statut d'une commande",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["pending", "confirmed", "delivered", "cancelled"],
+                    "example": "confirmed",
+                    "description": "Nouveau statut de la commande"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Statut mis à jour",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Order" }
+              }
+            }
+          },
+          "400": { "description": "Données invalides" },
+          "401": { "description": "Non authentifié" },
+          "403": { "description": "Accès non autorisé (commande n'appartient pas à la boutique)" },
+          "404": { "description": "Commande introuvable" }
+        }
+      }
+    },
     "/api/admin/shops": {
       "get": {
         "tags": ["Admin — Boutiques"],

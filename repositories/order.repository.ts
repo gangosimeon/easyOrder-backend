@@ -5,8 +5,8 @@ import Order, { IOrder } from '../models/order.model';
 
 export interface CreateOrderData {
   shopId: string;
-  customerName: string;
-  customerPhone: string;
+  customerName?: string;
+  customerPhone?: string;
   items: {
     productId: string;
     productName: string;

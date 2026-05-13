@@ -11,8 +11,8 @@ export interface IOrderItem {
 
 export interface IOrder extends Document {
   shopId: Types.ObjectId;
-  customerName: string;
-  customerPhone: string;
+  customerName?: string;
+  customerPhone?: string;
   items: IOrderItem[];
   total: number;
   status: 'pending' | 'confirmed' | 'delivered' | 'cancelled';
@@ -25,7 +25,7 @@ export interface IOrder extends Document {
 const orderItemSchema = new Schema<IOrderItem>(
   {
     productId:   { type: Schema.Types.ObjectId, ref: 'Product', required: true },
-    productName: { type: String, required: true },
+    productName: { type: String },
     price:       { type: Number, required: true },
     quantity:    { type: Number, required: true, min: 1 },
     image:       { type: String, default: '' },
@@ -37,8 +37,8 @@ const orderItemSchema = new Schema<IOrderItem>(
 const orderSchema = new Schema<IOrder>(
   {
     shopId:        { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    customerName:  { type: String, required: true, trim: true },
-    customerPhone: { type: String, required: true, trim: true },
+    customerName:  { type: String, trim: true },
+    customerPhone: { type: String, trim: true },
     items:         { type: [orderItemSchema], required: true },
     total:         { type: Number, required: true, min: 0 },
     status:        {

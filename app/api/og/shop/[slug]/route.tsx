@@ -181,7 +181,7 @@ function ProductCard({ p, dataUrl }: { p: ProductItem; dataUrl?: string | null }
       {/* Image produit */}
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img
-          src={dataUrl ?? p.image!}
+          src={dataUrl ?? p.image ?? ''}
           style={{
             width:      '100%',
             height:     '162px',
@@ -212,7 +212,7 @@ function ProductCard({ p, dataUrl }: { p: ProductItem; dataUrl?: string | null }
 
         {/* Badge "NOUVEAU" si < 7 jours */}
         {!hasPromo && p.createdAt &&
-          Date.now() - new Date(p.createdAt).getTime() < 7 * 86_400_000 ? (
+          (d => !isNaN(d) && Date.now() - d < 7 * 86_400_000)(new Date(p.createdAt).getTime()) ? (
           <div
             style={{
               position:     'absolute',

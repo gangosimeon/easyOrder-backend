@@ -2,6 +2,23 @@ import { connectDB } from './db';
 import User from '@/models/user.model';
 import Product from '@/models/product.model';
 
+interface ShopLean {
+  _id:          { toString(): string };
+  name?:        string;
+  slug?:        string;
+  description?: string;
+  address?:     string;
+  logo?:        string;
+  coverColor?:  string;
+  phone?:       string;
+}
+
+interface ProductLean {
+  name?:  string;
+  price?: number;
+  image?: string;
+}
+
 export interface ShopOGData {
   name:        string;
   slug:        string;
@@ -37,7 +54,7 @@ export async function getShopOGData(slug: string): Promise<ShopOGData | null> {
 
     const shop = await User.findOne({ slug })
       .select('name slug description address logo coverColor phone')
-      .lean();
+      .lean() as ShopLean | null;
 
     if (!shop) return null;
 
@@ -45,17 +62,17 @@ export async function getShopOGData(slug: string): Promise<ShopOGData | null> {
       .select('name price image')
       .sort({ createdAt: -1 })
       .limit(4)
-      .lean();
+      .lean() as ProductLean[];
 
     const data: ShopOGData = {
-      name:        (shop as any).name        ?? '',
-      slug:        (shop as any).slug        ?? slug,
-      description: (shop as any).description ?? '',
-      address:     (shop as any).address     ?? '',
-      logo:        (shop as any).logo        ?? '🏪',
-      coverColor:  (shop as any).coverColor  ?? '#a04343',
-      phone:       (shop as any).phone       ?? '',
-      products: (products as any[]).map(p => ({
+      name:        shop.name        ?? '',
+      slug:        shop.slug        ?? slug,
+      description: shop.description ?? '',
+      address:     shop.address     ?? '',
+      logo:        shop.logo        ?? '🏪',
+      coverColor:  shop.coverColor  ?? '#a04343',
+      phone:       shop.phone       ?? '',
+      products: products.map(p => ({
         name:  p.name  ?? '',
         price: p.price ?? 0,
         image: p.image ?? '',

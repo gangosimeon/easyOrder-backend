@@ -383,9 +383,9 @@ export async function GET(
   const allProducts = shopData.products ?? [];
   const cats  = shopData.categories ?? [];
 
-  // Les 4 premiers produits avec image valide
+  // Les 4 produits en stock les plus récents avec image valide
   const products = allProducts
-    .filter(p => isUrl(p.image))
+    .filter(p => isUrl(p.image) && p.inStock !== false)
     .slice(0, 4);
 
   // Couleur de marque (validée)

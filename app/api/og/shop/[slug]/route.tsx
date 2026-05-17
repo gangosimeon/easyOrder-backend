@@ -98,8 +98,35 @@ function darken(hex: string, f: number): string {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const isUrl   = (s?: string) => !!s && (s.startsWith('http://') || s.startsWith('https://'));
+const isUrl    = (s?: string) => !!s && (s.startsWith('http://') || s.startsWith('https://'));
 const fmtPrice = (n: number) => new Intl.NumberFormat('fr-FR').format(n) + ' FCFA';
+
+// ── Pré-charge une image et retourne un data URL (edge-safe, sans Node.js) ────
+// Satori peut échouer à charger des images externes depuis l'edge runtime.
+// En les convertissant en data URL avant le rendu, on garantit leur affichage.
+async function fetchImage(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4_000);
+    const res = await fetch(url, {
+      signal:  controller.signal,
+      headers: { Accept: 'image/*' },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > 2 * 1024 * 1024) return null; // > 2 MB ignorée
+    const mime  = res.headers.get('content-type') ?? 'image/jpeg';
+    const bytes = new Uint8Array(buf);
+    let binary  = '';
+    for (let i = 0; i < bytes.length; i += 8_192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8_192));
+    }
+    return `data:${mime};base64,${btoa(binary)}`;
+  } catch {
+    return null;
+  }
+}
 
 function nameSize(name: string): number {
   if (name.length > 32) return 30;
@@ -133,7 +160,7 @@ async function fetchShopData(slug: string): Promise<ShopApiData | null> {
 }
 
 // ── Composant : carte produit ─────────────────────────────────────────────────
-function ProductCard({ p }: { p: ProductItem }) {
+function ProductCard({ p, dataUrl }: { p: ProductItem; dataUrl?: string | null }) {
   const hasPromo    = (p.promotion ?? 0) > 0;
   const showBarred  = hasPromo && !!p.originalPrice;
   const displayed   = effectivePrice(p);
@@ -154,7 +181,7 @@ function ProductCard({ p }: { p: ProductItem }) {
       {/* Image produit */}
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img
-          src={p.image!}
+          src={dataUrl ?? p.image!}
           style={{
             width:      '100%',
             height:     '162px',
@@ -388,6 +415,16 @@ export async function GET(
     .filter(p => isUrl(p.image) && p.inStock !== false)
     .slice(0, 4);
 
+  // Pré-charge toutes les images en parallèle avant que Satori les rende
+  // → évite les échecs silencieux en edge (CORS, timeout, format non supporté)
+  const [logoDataUrl, img0, img1, img2, img3] = await Promise.all([
+    isUrl(shop.logo)    ? fetchImage(shop.logo!)           : Promise.resolve(null),
+    products[0]?.image  ? fetchImage(products[0].image!)   : Promise.resolve(null),
+    products[1]?.image  ? fetchImage(products[1].image!)   : Promise.resolve(null),
+    products[2]?.image  ? fetchImage(products[2].image!)   : Promise.resolve(null),
+    products[3]?.image  ? fetchImage(products[3].image!)   : Promise.resolve(null),
+  ]);
+
   // Couleur de marque (validée)
   const coverColor = /^#[0-9a-fA-F]{6}$/.test(shop.coverColor ?? '')
     ? shop.coverColor!
@@ -470,7 +507,7 @@ export async function GET(
             }}
           >
             {isUrl(shop.logo)
-              ? <img src={shop.logo!} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ? <img src={logoDataUrl ?? shop.logo!} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               : <span style={{ fontSize: '44px', lineHeight: 1 }}>{shop.logo || '🏪'}</span>
             }
           </div>
@@ -689,13 +726,13 @@ export async function GET(
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {/* Ligne 1 */}
           <div style={{ flex: 1, display: 'flex', gap: '10px' }}>
-            {products[0] ? <ProductCard p={products[0]} /> : <EmptySlot />}
-            {products[1] ? <ProductCard p={products[1]} /> : <EmptySlot />}
+            {products[0] ? <ProductCard p={products[0]} dataUrl={img0} /> : <EmptySlot />}
+            {products[1] ? <ProductCard p={products[1]} dataUrl={img1} /> : <EmptySlot />}
           </div>
           {/* Ligne 2 */}
           <div style={{ flex: 1, display: 'flex', gap: '10px' }}>
-            {products[2] ? <ProductCard p={products[2]} /> : <EmptySlot />}
-            {products[3] ? <ProductCard p={products[3]} /> : <EmptySlot />}
+            {products[2] ? <ProductCard p={products[2]} dataUrl={img2} /> : <EmptySlot />}
+            {products[3] ? <ProductCard p={products[3]} dataUrl={img3} /> : <EmptySlot />}
           </div>
         </div>
       </div>

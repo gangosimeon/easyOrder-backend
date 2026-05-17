@@ -1,5 +1,6 @@
 import { orderRepository, CreateOrderData } from '@/repositories/order.repository';
 import { CreateOrderInput } from '@/validators/order.validator';
+import { sendPushToUser } from '@/services/push-notification.service';
 
 export async function getOrdersByShop(shopId: string) {
   return orderRepository.findByShopId(shopId);
@@ -41,7 +42,19 @@ export async function createOrder(shopId: string, data: CreateOrderInput) {
     note: data.note,
     whatsappSent: data.whatsappSent,
   };
-  return orderRepository.create(createData);
+
+  const order = await orderRepository.create(createData);
+
+  // Envoi push notification au propriétaire de la boutique (fire & forget)
+  sendPushToUser(shopId, {
+    title: 'Nouvelle commande reçue 🛒',
+    body:  'Une nouvelle commande vient d\'être passée dans votre boutique.',
+    url:   '/orders',
+  }).catch(err => {
+    console.error('[createOrder] Erreur envoi push notification:', err);
+  });
+
+  return order;
 }
 
 export async function updateOrderStatus(

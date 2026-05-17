@@ -1,0 +1,39 @@
+# ── Build artifacts ──────────────────────────────────────────────────────────
+.next
+out
+dist
+
+# ── Dépendances (réinstallées dans le Dockerfile) ────────────────────────────
+node_modules
+
+# ── Variables d'environnement (JAMAIS dans l'image Docker) ──────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ── Outils de développement ───────────────────────────────────────────────────
+.eslintrc*
+.prettierrc*
+*.test.ts
+*.spec.ts
+__tests__
+coverage
+
+# ── Documentation ─────────────────────────────────────────────────────────────
+README.md
+CHANGELOG.md
+nginx-og.conf
+
+# ── Divers ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

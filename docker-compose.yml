@@ -1,0 +1,105 @@
+###############################################################################
+#  docker-compose.yml — JeCréeMaBoutique / Stack locale complète
+#
+#  Services :
+#    nextjs-og  — Backend Next.js (API + SSR + génération OG)
+#    mongodb    — Base de données MongoDB locale (dev uniquement)
+#
+#  Démarrage :
+#    docker compose up -d            # background
+#    docker compose up --build       # rebuild si code modifié
+#    docker compose logs -f nextjs-og
+#
+#  En production :
+#    - mongodb est remplacé par MongoDB Atlas (MONGODB_URI dans .env)
+#    - utiliser docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+###############################################################################
+
+services:
+
+  # ── Backend Next.js : API + SSR + Open Graph ─────────────────────────────
+  nextjs-og:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:4000}
+        FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4200}
+    container_name: jecreemaboutique-og
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV:              production
+      PORT:                  "4000"
+      # ── Base de données ─────────────────────────────────────────────────
+      MONGODB_URI:           ${MONGODB_URI:-mongodb://mongodb:27017/burkina-shop}
+      # ── Auth JWT ────────────────────────────────────────────────────────
+      JWT_SECRET:            ${JWT_SECRET:?JWT_SECRET requis}
+      JWT_EXPIRES_IN:        ${JWT_EXPIRES_IN:-7d}
+      # ── URLs ────────────────────────────────────────────────────────────
+      NEXT_PUBLIC_BASE_URL:  ${NEXT_PUBLIC_BASE_URL:-http://localhost:4000}
+      FRONTEND_URL:          ${FRONTEND_URL:-http://localhost:4200}
+      # ── Cloudinary (upload images) ──────────────────────────────────────
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY:    ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      # ── Cache invalidation OG ────────────────────────────────────────────
+      CACHE_INVALIDATION_SECRET: ${CACHE_INVALIDATION_SECRET:-}
+      # ── Web Push notifications ───────────────────────────────────────────
+      VAPID_PUBLIC_KEY:      ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY:     ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT:         ${VAPID_SUBJECT:-mailto:contact@jecreemaboutique.com}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test:     ["CMD", "wget", "-qO-", "http://localhost:4000/api/health"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+      start_period: 60s
+    networks:
+      - app-network
+    # Logs JSON pour faciliter l'ingestion (Datadog, CloudWatch…)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── MongoDB (dev uniquement — remplacer par Atlas en production) ───────────
+  mongodb:
+    image: mongo:7-jammy
+    container_name: jecreemaboutique-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: burkina-shop
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test:     ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout:  5s
+      retries:  5
+      start_period: 30s
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+# ── Volumes persistants ───────────────────────────────────────────────────────
+volumes:
+  mongo_data:
+    name: jecreemaboutique_mongo_data
+
+# ── Réseau interne ────────────────────────────────────────────────────────────
+networks:
+  app-network:
+    name:   jecreemaboutique_network
+    driver: bridge

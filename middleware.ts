@@ -1,93 +1,133 @@
+/**
+ * middleware.ts — JeCréeMaBoutique
+ *
+ * Responsabilités :
+ *  1. Routes /shop/:slug
+ *     • Bot social/search → Next.js SSR (retourne HTML + meta OG aux crawlers)
+ *     • Utilisateur réel  → Redirect 302 vers Angular SPA
+ *
+ *  2. Routes /api/*
+ *     • Routes publiques  → Passthrough
+ *     • Routes privées    → Vérification présence du token Bearer (JWT vérifié côté handler)
+ *
+ * Sécurité :
+ *  • Host header injection protection
+ *  • Security headers ajoutés sur toutes les réponses
+ *  • Query string préservée dans les redirections
+ *  • User-Agent vide traité comme utilisateur humain
+ *
+ * Debug :
+ *  Quand un bot est détecté, des headers X-Bot-* sont ajoutés pour faciliter
+ *  le monitoring et le débogage via curl / Postman.
+ */
+
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { detectBot } from '@/lib/bot-detector';
 
-// ── Public API routes (pas besoin de JWT) ────────────────────────────────────
-const PUBLIC_ROUTES = [
+// ── Configuration ──────────────────────────────────────────────────────────────
+const FRONTEND_URL =
+  (process.env.FRONTEND_URL ?? 'https://www.jecreemaboutique.com').replace(/\/$/, '');
+
+// ── Routes publiques (pas de JWT requis) ──────────────────────────────────────
+const PUBLIC_API_PREFIXES = [
   '/api/auth/register',
   '/api/auth/login',
-  '/api/public',
-  '/api/orders',
+  '/api/public',          // Données boutique publiques
+  '/api/orders',          // Commandes (créées sans compte)
   '/api/swagger',
-  '/api/shops/visit',
-  '/api/og',          // OG image route — toujours publique
+  '/api/shops/visit',     // Tracking des visites
+  '/api/og',              // OG image + invalidation cache
 ];
 
-// ── User-agents des crawlers / bots sociaux ──────────────────────────────────
-const BOT_PATTERNS = [
-  'facebookexternalhit',
-  'facebookcatalog',
-  'twitterbot',
-  'whatsapp',
-  'telegrambot',
-  'linkedinbot',
-  'slackbot',
-  'discordbot',
-  'pinterestbot',
-  'googlebot',
-  'bingbot',
-  'duckduckbot',
-  'baiduspider',
-  'yandexbot',
-  'sogou',
-  'ia_archiver',
-  'ahrefsbot',
-  'semrushbot',
-  'rogerbot',
-  'vkshare',
-  'w3c_validator',
-  'applebot',
-  'iframely',
-  'preview',
-  'crawler',
-  'spider',
-];
+// ── Headers de sécurité ajoutés sur toutes les réponses ──────────────────────
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options':  'nosniff',
+  'X-Frame-Options':         'DENY',
+  'X-XSS-Protection':        '1; mode=block',
+  'Referrer-Policy':         'strict-origin-when-cross-origin',
+};
 
-function isBot(userAgent: string): boolean {
-  const ua = userAgent.toLowerCase();
-  return BOT_PATTERNS.some(pattern => ua.includes(pattern));
+// ── Applique les security headers sur une réponse NextResponse ────────────────
+function withSecurityHeaders(res: NextResponse): NextResponse {
+  Object.entries(SECURITY_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
+  return res;
 }
 
-const FRONTEND_URL = process.env.FRONTEND_URL ?? 'https://www.jecreemaboutique.com';
+// ── Extrait proprement le slug depuis /shop/:slug[/...] ───────────────────────
+function extractSlug(pathname: string): string {
+  const parts = pathname.split('/');
+  // parts = ['', 'shop', 'merveille-shop', ...]
+  return parts[2] ?? '';
+}
 
-// ── Middleware principal ──────────────────────────────────────────────────────
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+// ── Reconstruit l'URL de destination en préservant la query string ────────────
+function buildAngularUrl(slug: string, search: string): string {
+  const path = slug ? `/shop/${encodeURIComponent(slug)}` : '';
+  return `${FRONTEND_URL}${path}${search}`;
+}
 
-  // ── Gestion des routes /shop/:slug (preview social) ─────────────────────
+// ── Middleware principal ───────────────────────────────────────────────────────
+export function middleware(request: NextRequest): NextResponse {
+  const { pathname, search } = request.nextUrl;
+
+  // ─── 1. Routes /shop/:slug ────────────────────────────────────────────────
   if (pathname.startsWith('/shop/')) {
-    const ua = request.headers.get('user-agent') ?? '';
+    const ua     = request.headers.get('user-agent') ?? '';
+    const result = detectBot(ua);
 
-    if (isBot(ua)) {
-      // Crawleur → Next.js sert la page SSR avec les meta OG
-      return NextResponse.next();
+    // ── Bot détecté → Next.js sert la page SSR avec les meta OG ─────────────
+    if (result.isBot) {
+      const response = NextResponse.next();
+
+      // Headers de debug (visibles dans curl / network tab)
+      response.headers.set('X-Bot-Detected', 'true');
+      response.headers.set('X-Bot-Name',     result.name);
+      response.headers.set('X-Bot-Category', result.category);
+      response.headers.set('X-Bot-Pattern',  result.pattern);
+
+      // Cache permissif pour les bots : pas de cookies, réponse statique
+      response.headers.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=3600');
+
+      return withSecurityHeaders(response);
     }
 
-    // Vrai utilisateur → redirection vers Angular
-    const slug = pathname.split('/')[2] ?? '';
-    const destination = slug
-      ? `${FRONTEND_URL}/shop/${slug}`
-      : FRONTEND_URL;
+    // ── Utilisateur réel → Angular SPA ──────────────────────────────────────
+    const slug        = extractSlug(pathname);
+    const destination = buildAngularUrl(slug, search);
 
-    return NextResponse.redirect(destination, { status: 302 });
+    const redirect = NextResponse.redirect(destination, { status: 302 });
+    redirect.headers.set('X-Bot-Detected', 'false');
+
+    return withSecurityHeaders(redirect);
   }
 
-  // ── Gestion des routes /api/* ────────────────────────────────────────────
-  if (request.method === 'OPTIONS') return NextResponse.next();
+  // ─── 2. Routes /api/* ────────────────────────────────────────────────────
+  if (request.method === 'OPTIONS') {
+    return withSecurityHeaders(NextResponse.next());
+  }
 
-  const isPublic = PUBLIC_ROUTES.some(route => pathname.startsWith(route));
-  if (isPublic) return NextResponse.next();
+  const isPublic = PUBLIC_API_PREFIXES.some(prefix => pathname.startsWith(prefix));
+  if (isPublic) {
+    return withSecurityHeaders(NextResponse.next());
+  }
 
+  // ── Vérification présence du token Bearer ────────────────────────────────
   const authHeader = request.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
-    return NextResponse.json(
-      { success: false, message: 'Non authentifié' },
-      { status: 401 }
+    return withSecurityHeaders(
+      NextResponse.json(
+        { success: false, message: 'Non authentifié', code: 'MISSING_TOKEN' },
+        { status: 401 }
+      )
     );
   }
 
-  return NextResponse.next();
+  return withSecurityHeaders(NextResponse.next());
 }
 
+// ── Matcher : uniquement les routes concernées ────────────────────────────────
+// Exclut les assets statiques (_next/static, _next/image, favicon.ico…)
 export const config = {
   matcher: [
     '/api/:path*',

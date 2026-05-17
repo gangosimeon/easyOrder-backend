@@ -3,26 +3,32 @@ import User from '@/models/user.model';
 import Product from '@/models/product.model';
 
 export interface ShopOGData {
-  name: string;
-  slug: string;
+  name:        string;
+  slug:        string;
   description: string;
-  address: string;
-  logo: string;
-  coverColor: string;
-  phone: string;
+  address:     string;
+  logo:        string;
+  coverColor:  string;
+  phone:       string;
   products: Array<{
-    name: string;
+    name:  string;
     price: number;
     image: string;
   }>;
 }
 
-/** In-memory cache: slug → { data, expiresAt } */
-const cache = new Map<string, { data: ShopOGData; expiresAt: number }>();
-const TTL_MS = 60 * 60 * 1000; // 1 hour
+interface CacheEntry {
+  data:      ShopOGData;
+  expiresAt: number;
+}
 
+// ── In-memory cache : slug → { data, expiresAt } ──────────────────────────────
+const cache = new Map<string, CacheEntry>();
+const TTL_MS = 60 * 60 * 1000; // 1 heure
+
+// ── Lecture des données boutique (avec cache) ──────────────────────────────────
 export async function getShopOGData(slug: string): Promise<ShopOGData | null> {
-  const now = Date.now();
+  const now    = Date.now();
   const cached = cache.get(slug);
   if (cached && cached.expiresAt > now) return cached.data;
 
@@ -42,14 +48,14 @@ export async function getShopOGData(slug: string): Promise<ShopOGData | null> {
       .lean();
 
     const data: ShopOGData = {
-      name:        shop.name        ?? '',
-      slug:        shop.slug        ?? slug,
-      description: shop.description ?? '',
-      address:     shop.address     ?? '',
-      logo:        shop.logo        ?? '🏪',
-      coverColor:  shop.coverColor  ?? '#a04343',
-      phone:       shop.phone       ?? '',
-      products: products.map(p => ({
+      name:        (shop as any).name        ?? '',
+      slug:        (shop as any).slug        ?? slug,
+      description: (shop as any).description ?? '',
+      address:     (shop as any).address     ?? '',
+      logo:        (shop as any).logo        ?? '🏪',
+      coverColor:  (shop as any).coverColor  ?? '#a04343',
+      phone:       (shop as any).phone       ?? '',
+      products: (products as any[]).map(p => ({
         name:  p.name  ?? '',
         price: p.price ?? 0,
         image: p.image ?? '',
@@ -63,8 +69,31 @@ export async function getShopOGData(slug: string): Promise<ShopOGData | null> {
   }
 }
 
+// ── Invalide le cache pour un slug donné ──────────────────────────────────────
+export function invalidateShopOGCache(slug: string): boolean {
+  return cache.delete(slug);
+}
+
+// ── Invalide tout le cache (utilisé au redémarrage ou en urgence) ─────────────
+export function clearAllOGCache(): void {
+  cache.clear();
+}
+
+// ── Retourne les stats du cache (utile pour le monitoring) ────────────────────
+export function getOGCacheStats(): { size: number; keys: string[] } {
+  return {
+    size: cache.size,
+    keys: Array.from(cache.keys()),
+  };
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 export function isImageUrl(value?: string): boolean {
-  return !!value && (value.startsWith('http') || value.startsWith('https') || value.startsWith('data:'));
+  return !!value && (
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    value.startsWith('data:image/')
+  );
 }
 
 export function formatPrice(price: number): string {

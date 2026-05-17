@@ -120,7 +120,7 @@ async function fetchImage(url: string): Promise<string | null> {
     const bytes = new Uint8Array(buf);
     let binary  = '';
     for (let i = 0; i < bytes.length; i += 8_192) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + 8_192));
+      binary += String.fromCharCode(...Array.from(bytes.subarray(i, i + 8_192)));
     }
     return `data:${mime};base64,${btoa(binary)}`;
   } catch {

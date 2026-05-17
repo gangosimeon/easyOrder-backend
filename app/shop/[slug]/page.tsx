@@ -74,15 +74,7 @@ export async function generateMetadata(
           width:  1200,
           height: 630,
           alt:    `${data.name} — Aperçu boutique et produits`,
-          // type MIME explicite aide Facebook et WhatsApp
           type:   'image/png',
-        },
-        // Image carrée (240×240) : utilisée par WhatsApp en mode thumbnail
-        {
-          url:    logoUrl,
-          width:  240,
-          height: 240,
-          alt:    `Logo ${data.name}`,
         },
       ],
     },

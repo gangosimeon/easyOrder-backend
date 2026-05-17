@@ -29,19 +29,20 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-// ── Fetch une police depuis Google Fonts CSS API v2 ───────────────────────────
+// ── Fetch une police depuis Google Fonts CSS API v1 ───────────────────────────
+// Satori (next/og) ne supporte PAS le format woff2 — il exige TTF/OTF.
+// L'API v1 avec un vieux User-Agent retourne du TTF (format truetype).
 async function fetchGoogleFont(family: string, weight: Weight): Promise<ArrayBuffer | null> {
   try {
+    // CSS API v1 : retourne TTF avec un ancien User-Agent
     const cssUrl =
-      `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@${weight}&display=swap`;
+      `https://fonts.googleapis.com/css?family=${encodeURIComponent(family)}:${weight}`;
 
     const css = await withTimeout(
       fetch(cssUrl, {
-        // UA moderne obligatoire → Google Fonts retourne woff2 (et non woff/ttf)
+        // Vieux UA → Google Fonts retourne TTF au lieu de woff2
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
-            '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)',
         },
       }).then(r => {
         if (!r.ok) throw new Error(`Google Fonts CSS ${r.status}`);
@@ -50,8 +51,8 @@ async function fetchGoogleFont(family: string, weight: Weight): Promise<ArrayBuf
       6_000
     );
 
-    // Extrait l'URL woff2 de la règle @font-face
-    const match = css.match(/src:\s*url\(([^)]+)\)\s*format\(['"]?woff2['"]?\)/);
+    // Extrait l'URL TTF (truetype) de la règle @font-face
+    const match = css.match(/src:\s*url\(([^)]+)\)\s*format\(['"]?truetype['"]?\)/);
     if (!match?.[1]) return null;
 
     return withTimeout(

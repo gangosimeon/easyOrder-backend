@@ -179,7 +179,7 @@ function ProductCard({ p, dataUrl }: { p: ProductItem; dataUrl?: string | null }
       }}
     >
       {/* Image produit */}
-      <div style={{ position: 'relative', flexShrink: 0 }}>
+      <div style={{ position: 'relative', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
         <img
           src={dataUrl ?? p.image ?? ''}
           style={{

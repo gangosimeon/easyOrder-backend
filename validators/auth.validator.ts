@@ -23,6 +23,12 @@ export const updateProfileSchema = z.object({
   coverColor:  z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Couleur hexadécimale invalide').optional(),
 });
 
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Le mot de passe actuel est requis'),
+  newPassword: z.string().min(6, 'Le mot de passe doit avoir au moins 6 caractères'),
+});
+
 export type RegisterInput      = z.infer<typeof registerSchema>;
 export type LoginInput         = z.infer<typeof loginSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;

@@ -33,6 +33,9 @@ const FRONTEND_URL =
 const PUBLIC_API_PREFIXES = [
   '/api/auth/register',
   '/api/auth/login',
+  '/api/auth/forgot-password',   // Réinitialisation mot de passe
+  '/api/auth/verify-otp',        // Vérification OTP
+  '/api/auth/reset-password',    // Nouveau mot de passe
   '/api/public',          // Données boutique publiques
   '/api/orders',          // Commandes (créées sans compte)
   '/api/swagger',

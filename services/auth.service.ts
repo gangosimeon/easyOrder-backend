@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import User, { UserPublic } from '@/models/user.model';
 import { signToken, JWTPayload } from '@/lib/auth';
-import { RegisterInput, LoginInput, UpdateProfileInput } from '@/validators/auth.validator';
+import { RegisterInput, LoginInput, UpdateProfileInput, ChangePasswordInput } from '@/validators/auth.validator';
 
 function generateSlug(name: string): string {
   return name
@@ -103,4 +103,34 @@ export async function updateUserProfile(
     throw Object.assign(new Error('Utilisateur introuvable'), { status: 404 });
   }
   return user.toObject() as unknown as UserPublic;
+}
+
+export async function changeUserPassword(
+  userId: string,
+  data: ChangePasswordInput
+): Promise<{ message: string }> {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw Object.assign(new Error('Utilisateur introuvable'), { status: 404 });
+  }
+
+  // Vérifier le mot de passe actuel
+  const isValid = await bcrypt.compare(data.currentPassword, user.password);
+  if (!isValid) {
+    throw Object.assign(new Error('Mot de passe actuel incorrect'), { status: 400 });
+  }
+
+  // Empêcher la réutilisation du même mot de passe
+  const isSamePassword = await bcrypt.compare(data.newPassword, user.password);
+  if (isSamePassword) {
+    throw Object.assign(new Error('Le nouveau mot de passe doit être différent de l\'actuel'), { status: 400 });
+  }
+
+  // Hasher le nouveau mot de passe
+  const hashedPassword = await bcrypt.hash(data.newPassword, 12);
+
+  // Mettre à jour le mot de passe
+  await User.findByIdAndUpdate(userId, { $set: { password: hashedPassword } });
+
+  return { message: 'Mot de passe modifié avec succès' };
 }

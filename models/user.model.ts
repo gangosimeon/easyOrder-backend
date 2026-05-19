@@ -10,6 +10,12 @@ export interface IUser extends Document {
   address: string;
   coverColor: string;
   role: 'admin' | 'user';
+  recoveryEmail?: string;
+  recoveryEmailVerified: boolean;
+  recoveryOtp?: string;
+  recoveryOtpExpireAt?: Date;
+  resetOtp?: string;
+  resetOtpExpireAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,6 +31,12 @@ const userSchema = new Schema<IUser>(
     address:     { type: String, default: '' },
     coverColor:  { type: String, default: '#a04343' },
     role:        { type: String, enum: ['admin', 'user'], default: 'user' },
+    recoveryEmail: { type: String, trim: true, lowercase: true },
+    recoveryEmailVerified: { type: Boolean, default: false },
+    recoveryOtp: { type: String },
+    recoveryOtpExpireAt: { type: Date },
+    resetOtp: { type: String },
+    resetOtpExpireAt: { type: Date },
   },
   { timestamps: true }
 );

@@ -1,38 +1,15 @@
-import * as nodemailer from 'nodemailer';
-import { resolve4 } from 'node:dns/promises';
+import { Resend } from 'resend';
 
-// ── Résout smtp.gmail.com en IPv4 explicitement ───────────────────────────────
-// Render.com ne supporte pas les connexions SMTP sortantes en IPv6.
-// dns.resolve4() retourne TOUJOURS des adresses A (IPv4), jamais AAAA (IPv6).
-async function createTransporter() {
-  let host = 'smtp.gmail.com';
-  try {
-    const [ipv4] = await resolve4('smtp.gmail.com');
-    host = ipv4;
-  } catch {
-    // Fallback au hostname si la résolution échoue
-  }
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-  return nodemailer.createTransport({
-    host,
-    port: 465,
-    secure: true,
-    // SNI obligatoire quand on passe une IP au lieu du hostname
-    tls: { servername: 'smtp.gmail.com' },
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-  });
-}
+// Adresse expéditeur — doit correspondre à un domaine vérifié sur resend.com
+// En attendant la vérification du domaine, utilise onboarding@resend.dev pour tester
+const FROM_ADDRESS = process.env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev';
 
-// Singleton (chargé une fois par worker)
-const transporterPromise = createTransporter();
-
-// ── Types d'OTP supportés ───────────────────────────────────────────────────────────
+// ── Types d'OTP supportés ─────────────────────────────────────────────────────
 type OtpType = 'forgot-password' | 'recovery-email' | 'login-otp';
 
-// ── Configuration des messages par type ─────────────────────────────────────────────
+// ── Configuration des messages par type ──────────────────────────────────────
 const otpMessages: Record<OtpType, { subject: string; title: string; message: string }> = {
   'forgot-password': {
     subject: 'Code de récupération de mot de passe',
@@ -51,7 +28,7 @@ const otpMessages: Record<OtpType, { subject: string; title: string; message: st
   },
 };
 
-// ── Template HTML email ───────────────────────────────────────────────────────────
+// ── Template HTML email ───────────────────────────────────────────────────────
 function getEmailTemplate(otp: string, type: OtpType): string {
   const config = otpMessages[type];
 
@@ -129,9 +106,6 @@ function getEmailTemplate(otp: string, type: OtpType): string {
             font-size: 14px;
             color: #856404;
           }
-          .security-icon {
-            margin-right: 8px;
-          }
           .footer {
             text-align: center;
             margin-top: 30px;
@@ -157,14 +131,14 @@ function getEmailTemplate(otp: string, type: OtpType): string {
             <div class="logo">🏪 JeCreeMaBoutique</div>
             <h1 class="title">${config.title}</h1>
             <p class="message">${config.message}</p>
-            
+
             <div class="otp-container">
               <div class="otp-label">Votre code de vérification</div>
               <p class="otp-code">${otp}</p>
             </div>
 
             <div class="security">
-              <span class="security-icon">🔒</span>
+              <span>🔒</span>
               <strong>Information importante :</strong>
               <br>
               Ce code expire dans 5 minutes. Ne le partagez avec personne.
@@ -183,35 +157,36 @@ function getEmailTemplate(otp: string, type: OtpType): string {
   `;
 }
 
-// ── Fonction principale d'envoi d'OTP ─────────────────────────────────────────────
-export async function sendOtpEmail(to: string, otp: string, type: OtpType): Promise<{ success: boolean; error?: string }> {
+// ── Envoi d'OTP via Resend (HTTP — pas de blocage de port SMTP) ───────────────
+export async function sendOtpEmail(
+  to: string,
+  otp: string,
+  type: OtpType
+): Promise<{ success: boolean; error?: string }> {
   try {
     const config = otpMessages[type];
-    const html = getEmailTemplate(otp, type);
-
-    const mailOptions = {
-      from: `"JeCreeMaBoutique" <${process.env.GMAIL_USER}>`,
+    const { error } = await resend.emails.send({
+      from: FROM_ADDRESS,
       to,
       subject: config.subject,
-      html,
-    };
+      html: getEmailTemplate(otp, type),
+    });
 
-    const transporter = await transporterPromise;
-    const info = await transporter.sendMail(mailOptions);
+    if (error) {
+      console.error(`[EMAIL ERROR] Type: ${type} | To: ${to} | Error: ${error.message} | Timestamp: ${new Date().toISOString()}`);
+      return { success: false, error: 'Impossible d\'envoyer l\'email. Veuillez réessayer.' };
+    }
 
-    console.log(`[EMAIL SENT] Type: ${type} | To: ${to} | MessageId: ${info.messageId} | Timestamp: ${new Date().toISOString()}`);
-
+    console.log(`[EMAIL SENT] Type: ${type} | To: ${to} | Timestamp: ${new Date().toISOString()}`);
     return { success: true };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Erreur inconnue lors de l\'envoi de l\'email';
-    console.error(`[EMAIL ERROR] Type: ${type} | To: ${to} | Error: ${errorMessage} | Timestamp: ${new Date().toISOString()}`);
-    
-    // Ne pas exposer l'erreur technique
+    const msg = error instanceof Error ? error.message : 'Erreur inconnue';
+    console.error(`[EMAIL ERROR] Type: ${type} | To: ${to} | Error: ${msg} | Timestamp: ${new Date().toISOString()}`);
     return { success: false, error: 'Impossible d\'envoyer l\'email. Veuillez réessayer.' };
   }
 }
 
-// ── Vérification de la configuration SMTP ─────────────────────────────────────────
+// ── Vérification de la configuration ─────────────────────────────────────────
 export function isMailerConfigured(): boolean {
-  return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
+  return !!process.env.RESEND_API_KEY;
 }

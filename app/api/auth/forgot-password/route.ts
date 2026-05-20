@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
-import { sendOtpEmail } from '@/lib/mailer';
+import { sendOtpEmail, isMailerConfigured } from '@/lib/mailer';
 import User from '@/models/user.model';
 import crypto from 'crypto';
 
@@ -40,10 +40,16 @@ export async function POST(req: Request) {
     user.resetOtpExpireAt = otpExpireAt;
     await user.save();
 
-    // Envoyer l'email (sans bloquer la réponse si erreur)
-    sendOtpEmail(email, otp, 'forgot-password').catch(err => {
-      console.error('[EMAIL ERROR] forgot-password:', err?.message);
-    });
+    // Vérifier la configuration du mailer
+    if (!isMailerConfigured()) {
+      console.error('[EMAIL ERROR] GMAIL_USER ou GMAIL_APP_PASSWORD manquant dans .env.local');
+    }
+
+    // Envoyer l'email
+    const emailResult = await sendOtpEmail(email, otp, 'forgot-password');
+    if (!emailResult.success) {
+      console.error('[EMAIL ERROR] forgot-password: échec envoi à', email, '|', emailResult.error);
+    }
 
     return NextResponse.json({
       success: true,

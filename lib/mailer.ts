@@ -2,12 +2,15 @@ import * as nodemailer from 'nodemailer';
 
 // ── Configuration Gmail SMTP ─────────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
+  family: 4,
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
   },
-});
+} as any);
 
 // ── Types d'OTP supportés ───────────────────────────────────────────────────────────
 type OtpType = 'forgot-password' | 'recovery-email' | 'login-otp';

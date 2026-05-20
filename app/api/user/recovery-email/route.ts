@@ -30,12 +30,14 @@ export async function POST(req: Request) {
     }
 
     // ── Sauvegarder email temporaire et envoyer OTP ───────────────────────────
-    const result = await setRecoveryEmail(payload.userId, parsed.data.email);
-    
-    // Générer et envoyer OTP
-    await sendRecoveryEmailOtp(payload.userId, parsed.data.email);
+    await setRecoveryEmail(payload.userId, parsed.data.email);
 
-    return res.ok({ 
+    // Envoyer OTP en arrière-plan — ne bloque pas la réponse (évite 504 sur Render)
+    sendRecoveryEmailOtp(payload.userId, parsed.data.email).catch(err =>
+      console.error('[recovery-email] OTP send failed:', err)
+    );
+
+    return res.ok({
       message: 'Email de récupération ajouté. Vérifiez votre boîte mail pour le code OTP.',
       email: parsed.data.email
     });

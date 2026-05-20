@@ -1,19 +1,33 @@
 import * as nodemailer from 'nodemailer';
-import { setDefaultResultOrder } from 'node:dns';
+import { resolve4 } from 'node:dns/promises';
 
-// Force IPv4 — Render.com ne supporte pas IPv6 vers smtp.gmail.com
-setDefaultResultOrder('ipv4first');
+// ── Résout smtp.gmail.com en IPv4 explicitement ───────────────────────────────
+// Render.com ne supporte pas les connexions SMTP sortantes en IPv6.
+// dns.resolve4() retourne TOUJOURS des adresses A (IPv4), jamais AAAA (IPv6).
+async function createTransporter() {
+  let host = 'smtp.gmail.com';
+  try {
+    const [ipv4] = await resolve4('smtp.gmail.com');
+    host = ipv4;
+  } catch {
+    // Fallback au hostname si la résolution échoue
+  }
 
-// ── Configuration Gmail SMTP ─────────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
+  return nodemailer.createTransport({
+    host,
+    port: 465,
+    secure: true,
+    // SNI obligatoire quand on passe une IP au lieu du hostname
+    tls: { servername: 'smtp.gmail.com' },
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD,
+    },
+  });
+}
+
+// Singleton (chargé une fois par worker)
+const transporterPromise = createTransporter();
 
 // ── Types d'OTP supportés ───────────────────────────────────────────────────────────
 type OtpType = 'forgot-password' | 'recovery-email' | 'login-otp';
@@ -182,6 +196,7 @@ export async function sendOtpEmail(to: string, otp: string, type: OtpType): Prom
       html,
     };
 
+    const transporter = await transporterPromise;
     const info = await transporter.sendMail(mailOptions);
 
     console.log(`[EMAIL SENT] Type: ${type} | To: ${to} | MessageId: ${info.messageId} | Timestamp: ${new Date().toISOString()}`);

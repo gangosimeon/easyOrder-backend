@@ -45,11 +45,12 @@ export async function POST(req: Request) {
       console.error('[EMAIL ERROR] GMAIL_USER ou GMAIL_APP_PASSWORD manquant dans .env.local');
     }
 
-    // Envoyer l'email
-    const emailResult = await sendOtpEmail(email, otp, 'forgot-password');
-    if (!emailResult.success) {
-      console.error('[EMAIL ERROR] forgot-password: échec envoi à', email, '|', emailResult.error);
-    }
+    // Envoyer l'email en arrière-plan — ne bloque pas la réponse (évite 504 sur Render)
+    sendOtpEmail(email, otp, 'forgot-password').then(result => {
+      if (!result.success) {
+        console.error('[EMAIL ERROR] forgot-password: échec envoi à', email, '|', result.error);
+      }
+    }).catch(err => console.error('[EMAIL ERROR] forgot-password:', err));
 
     return NextResponse.json({
       success: true,

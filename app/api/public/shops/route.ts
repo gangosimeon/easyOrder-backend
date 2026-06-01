@@ -1,7 +1,6 @@
 import { connectDB } from '@/lib/db';
 import * as res from '@/lib/api-response';
 import User from '@/models/user.model';
-import Product from '@/models/product.model';
 import { PipelineStage } from 'mongoose';
 
 // ── DTO aligné sur PublicShopInfo (frontend) ──────────────────────────────────
@@ -28,7 +27,10 @@ export async function GET(req: Request) {
     const search = searchParams.get('search')?.trim() ?? '';
     const limit  = Math.min(Number(searchParams.get('limit') ?? '50'), 100);
 
-    const matchStage: Record<string, unknown> = { role: 'user' };
+    const matchStage: Record<string, unknown> = {
+      role:     'user',
+      isActive: { $ne: false },  // true ou absent (rétro-compatibilité)
+    };
     if (search) {
       matchStage['$or'] = [
         { name:    { $regex: search, $options: 'i' } },

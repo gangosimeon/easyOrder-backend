@@ -21,6 +21,7 @@ export interface AdminShopDTO {
   createdAt:    Date;
   productCount: number;
   status:       'active' | 'inactive';
+  isActive:     boolean;
   publicUrl:    string;
 }
 
@@ -59,6 +60,7 @@ function toDTO(shop: Record<string, unknown>, baseUrl: string): AdminShopDTO {
     createdAt:    shop.createdAt as Date,
     productCount: Number(shop.productCount ?? 0),
     status:       (shop.status as 'active' | 'inactive') ?? 'inactive',
+    isActive:     shop.isActive !== false,
     publicUrl:    `${baseUrl}/shop/${String(shop.slug ?? '')}`,
   };
 }

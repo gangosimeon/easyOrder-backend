@@ -23,8 +23,6 @@ const pushSubscriptionSchema = new Schema<IPushSubscription>(
   { timestamps: true }
 );
 
-pushSubscriptionSchema.index({ userId: 1 });
-
 const PushSubscription: Model<IPushSubscription> =
   mongoose.models.PushSubscription ??
   mongoose.model<IPushSubscription>('PushSubscription', pushSubscriptionSchema);

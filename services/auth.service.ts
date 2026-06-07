@@ -26,8 +26,16 @@ async function ensureUniqueSlug(base: string): Promise<string> {
 export async function registerUser(
   data: RegisterInput
 ): Promise<{ user: UserPublic; token: string }> {
-  const existingPhone = await User.findOne({ phone: data.phone });
-  if (existingPhone) {
+  const fullPhone = data.countryCode ? data.countryCode + data.phone : undefined;
+
+  // Check uniqueness on local phone and fullPhone
+  const conflict = await User.findOne({
+    $or: [
+      { phone: data.phone },
+      ...(fullPhone ? [{ fullPhone }] : []),
+    ],
+  });
+  if (conflict) {
     throw Object.assign(new Error('Ce numéro est déjà utilisé'), { status: 409 });
   }
 
@@ -38,6 +46,7 @@ export async function registerUser(
 
   const user = await User.create({
     ...data,
+    fullPhone,
     slug,
     password: hashed,
     role: 'user',
@@ -59,7 +68,13 @@ export async function registerUser(
 export async function loginUser(
   data: LoginInput
 ): Promise<{ user: UserPublic; token: string }> {
-  const user = await User.findOne({ phone: data.phone });
+  // Accept local phone OR full international number (backward compatible)
+  const user = await User.findOne({
+    $or: [
+      { phone: data.phone },
+      { fullPhone: data.phone },
+    ],
+  });
   if (!user) {
     throw Object.assign(new Error('Numéro ou mot de passe incorrect'), { status: 401 });
   }

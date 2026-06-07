@@ -4,6 +4,8 @@ export interface IUser extends Document {
   name: string;
   slug: string;
   phone: string;
+  countryCode?: string;
+  fullPhone?: string;
   password: string;
   description: string;
   logo: string;
@@ -26,6 +28,8 @@ const userSchema = new Schema<IUser>(
     name:        { type: String, required: true, trim: true },
     slug:        { type: String, required: true, unique: true, lowercase: true, trim: true },
     phone:       { type: String, required: true, unique: true, trim: true },
+    countryCode: { type: String, trim: true },
+    fullPhone:   { type: String, trim: true, sparse: true },
     password:    { type: String, required: true },
     description: { type: String, default: '' },
     logo:        { type: String, default: '🏪' },
@@ -48,6 +52,8 @@ export type UserPublic = {
   name: string;
   slug: string;
   phone: string;
+  countryCode?: string;
+  fullPhone?: string;
   description: string;
   logo: string;
   address: string;

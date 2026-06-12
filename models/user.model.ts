@@ -63,6 +63,9 @@ export type UserPublic = {
   updatedAt: Date;
 };
 
+// Optimise le $match { role: 'user', isActive: { $ne: false } } du pipeline public/shops
+userSchema.index({ role: 1, isActive: 1 });
+
 const User: Model<IUser> =
   mongoose.models.User ?? mongoose.model<IUser>('User', userSchema);
 

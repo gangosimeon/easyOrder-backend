@@ -1,6 +1,7 @@
 import { connectDB } from '@/lib/db';
 import * as res from '@/lib/api-response';
 import Category from '@/models/category.model';
+import { NextResponse } from 'next/server';
 
 // ── GET /api/public/categories ────────────────────────────────────────────────
 // Retourne toutes les catégories distinctes des boutiques actives
@@ -41,13 +42,16 @@ export async function GET() {
       { $sort: { count: -1, name: 1 } },
     ]);
 
-    return res.ok(
-      raw.map(c => ({
-        name:  String(c.name  ?? ''),
-        color: String(c.color ?? '#FF6B35'),
-        icon:  String(c.icon  ?? 'inventory_2'),
-        count: Number(c.count ?? 0),
-      }))
+    const data = raw.map(c => ({
+      name:  String(c.name  ?? ''),
+      color: String(c.color ?? '#FF6B35'),
+      icon:  String(c.icon  ?? 'inventory_2'),
+      count: Number(c.count ?? 0),
+    }));
+
+    return NextResponse.json(
+      { success: true, data },
+      { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=30' } }
     );
   } catch {
     return res.serverError();

@@ -1,7 +1,14 @@
 import { connectDB } from '@/lib/db';
 import * as res from '@/lib/api-response';
 import User from '@/models/user.model';
+import { NextResponse } from 'next/server';
 import { PipelineStage } from 'mongoose';
+
+interface PreviewProduct {
+  id:    string;
+  image: string;
+  name:  string;
+}
 
 interface ShopCategory {
   name:  string;
@@ -10,20 +17,30 @@ interface ShopCategory {
 }
 
 interface PublicShopDTO {
-  id:           string;
-  name:         string;
-  slug:         string;
-  address:      string;
-  logo:         string;
-  coverColor:   string;
-  productCount: number;
-  status:       'active' | 'inactive';
-  categories:   ShopCategory[];
+  id:              string;
+  name:            string;
+  slug:            string;
+  address:         string;
+  logo:            string;
+  coverColor:      string;
+  productCount:    number;
+  status:          'active' | 'inactive';
+  categories:      ShopCategory[];
+  previewProducts: PreviewProduct[];
+}
+
+interface ShopsListResponse {
+  shops:      PublicShopDTO[];
+  page:       number;
+  limit:      number;
+  totalPages: number;
+  totalItems: number;
+  hasMore:    boolean;
 }
 
 // ── GET /api/public/shops ─────────────────────────────────────────────────────
-// Pas d'authentification requise
-// Params : search, category, limit
+// Params : search, category, page (défaut 1), limit (défaut 25, max 100)
+// Réponse paginée — rétrocompatible (anciens clients sans page= obtiennent page 1)
 
 export async function GET(req: Request) {
   try {
@@ -32,7 +49,9 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const search   = searchParams.get('search')?.trim()   ?? '';
     const category = searchParams.get('category')?.trim() ?? '';
-    const limit    = Math.min(Number(searchParams.get('limit') ?? '50'), 100);
+    const page     = Math.max(1, Number(searchParams.get('page')  ?? '1'));
+    const limit    = Math.min(Math.max(1, Number(searchParams.get('limit') ?? '25')), 100);
+    const skip     = (page - 1) * limit;
 
     const matchStage: Record<string, unknown> = {
       role:     'user',
@@ -49,32 +68,50 @@ export async function GET(req: Request) {
     const pipeline: PipelineStage[] = [
       { $match: matchStage },
 
-      // Produits → productCount + status
+      // ── Compter les produits sans les charger en RAM ──────────────────────
       {
         $lookup: {
-          from:         'products',
-          localField:   '_id',
-          foreignField: 'shopId',
-          as:           '_products',
+          from:     'products',
+          let:      { sid: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$shopId', '$$sid'] } } },
+            { $count: 'n' },
+          ],
+          as: '_pCount',
         },
       },
       {
         $addFields: {
-          productCount: { $size: '$_products' },
-          status: {
-            $cond: [{ $gt: [{ $size: '$_products' }, 0] }, 'active', 'inactive'],
-          },
+          productCount: { $ifNull: [{ $arrayElemAt: ['$_pCount.n', 0] }, 0] },
         },
       },
-      { $match: { status: 'active' } },
+      { $match: { productCount: { $gt: 0 } } },
 
-      // Catégories → pour filtre + badge
+      // ── 4 images d'aperçu (champs minimaux) ──────────────────────────────
       {
         $lookup: {
-          from:         'categories',
-          localField:   '_id',
-          foreignField: 'shopId',
-          as:           '_cats',
+          from:     'products',
+          let:      { sid: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$shopId', '$$sid'] }, image: { $ne: '' } } },
+            { $sort:  { createdAt: -1 } },
+            { $limit: 4 },
+            { $project: { image: 1, name: 1 } },
+          ],
+          as: '_preview',
+        },
+      },
+
+      // ── Catégories (champs minimaux) ──────────────────────────────────────
+      {
+        $lookup: {
+          from:     'categories',
+          let:      { sid: '$_id' },
+          pipeline: [
+            { $match:   { $expr: { $eq: ['$shopId', '$$sid'] } } },
+            { $project: { name: 1, color: 1, icon: 1 } },
+          ],
+          as: '_cats',
         },
       },
 
@@ -83,7 +120,7 @@ export async function GET(req: Request) {
         ? [{ $match: { '_cats.name': { $regex: `^${category}$`, $options: 'i' } } } as PipelineStage]
         : []),
 
-      // Transformer _cats → categories (DTO propre)
+      // ── Construire les champs de sortie ───────────────────────────────────
       {
         $addFields: {
           categories: {
@@ -93,21 +130,41 @@ export async function GET(req: Request) {
               in:    { name: '$$c.name', color: '$$c.color', icon: '$$c.icon' },
             },
           },
+          previewProducts: {
+            $map: {
+              input: '$_preview',
+              as:    'p',
+              in:    { id: { $toString: '$$p._id' }, image: '$$p.image', name: '$$p.name' },
+            },
+          },
         },
       },
 
       {
         $project: {
-          _products: 0, _cats: 0,
+          _pCount: 0, _preview: 0, _cats: 0,
           password: 0, phone: 0, email: 0, countryCode: 0, fullPhone: 0,
+          recoveryEmail: 0, recoveryOtp: 0, resetOtp: 0,
         },
       },
 
-      { $sort:  { productCount: -1 } },
-      { $limit: limit },
+      { $sort: { productCount: -1 } },
+
+      // ── Pagination + total en une seule passe ($facet) ────────────────────
+      {
+        $facet: {
+          data:  [{ $skip: skip }, { $limit: limit }],
+          total: [{ $count: 'count' }],
+        },
+      },
     ];
 
-    const raw = await (User.aggregate(pipeline) as unknown as Promise<Record<string, unknown>[]>);
+    type FacetResult = { data: Record<string, unknown>[]; total: [{ count: number }] | [] };
+    const [result] = await (User.aggregate(pipeline) as unknown as Promise<FacetResult[]>);
+
+    const raw        = result?.data  ?? [];
+    const totalItems = result?.total?.[0]?.count ?? 0;
+    const totalPages = totalItems > 0 ? Math.ceil(totalItems / limit) : 0;
 
     const shops: PublicShopDTO[] = raw.map(s => ({
       id:           String(s._id),
@@ -118,16 +175,35 @@ export async function GET(req: Request) {
       coverColor:   String(s.coverColor ?? '#E8521A'),
       productCount: Number(s.productCount ?? 0),
       status:       'active',
-      categories:   Array.isArray(s.categories)
+      categories: Array.isArray(s.categories)
         ? (s.categories as ShopCategory[]).map(c => ({
             name:  String(c.name  ?? ''),
             color: String(c.color ?? '#FF6B35'),
             icon:  String(c.icon  ?? 'inventory_2'),
           }))
         : [],
+      previewProducts: Array.isArray(s.previewProducts)
+        ? (s.previewProducts as Array<{ id?: unknown; image?: unknown; name?: unknown }>).map(p => ({
+            id:    String(p.id    ?? ''),
+            image: String(p.image ?? ''),
+            name:  String(p.name  ?? ''),
+          }))
+        : [],
     }));
 
-    return res.ok(shops);
+    const response: ShopsListResponse = {
+      shops,
+      page,
+      limit,
+      totalPages,
+      totalItems,
+      hasMore: page < totalPages,
+    };
+
+    return NextResponse.json(
+      { success: true, data: response },
+      { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=30' } }
+    );
   } catch {
     return res.serverError();
   }

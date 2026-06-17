@@ -47,15 +47,18 @@ const BOT_REGISTRY: BotEntry[] = [
 
   {
     name:     'WhatsApp',
+    // whatsapp        : UA device WhatsApp (status & messages mobiles)
+    // whatsapp-media  : crawler media WhatsApp
     patterns: ['whatsapp'],
     category: 'social',
   },
   {
     name:     'Facebook',
-    // facebot : crawler interne Facebook Messages
-    // facebookexternalhit : crawler Open Graph
-    // facebookcatalog : crawler catalogue produits
-    patterns: ['facebookexternalhit', 'facebookcatalog', 'facebot'],
+    // facebookexternalhit : crawler Open Graph standard (Facebook App + Lite)
+    // facebookcatalog     : crawler catalogue produits
+    // facebot             : crawler interne Facebook Messages
+    // facebookbot         : variante documentée pour certains outils Meta
+    patterns: ['facebookexternalhit', 'facebookcatalog', 'facebot', 'facebookbot'],
     category: 'social',
   },
   {

@@ -27,8 +27,20 @@ import { detectBot } from '@/lib/bot-detector';
 // ── ISR : les données boutique sont revalidées toutes les heures ──────────────
 export const revalidate = 3600;
 
-const BASE_URL    = (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://easyorder-backend-wnku.onrender.com').replace(/\/$/, '');
-const ANGULAR_URL = (process.env.FRONTEND_URL         ?? 'https://www.jecreemaboutique.com').replace(/\/$/, '');
+const ANGULAR_URL = (process.env.FRONTEND_URL ?? 'https://www.jecreemaboutique.com').replace(/\/$/, '');
+
+// ── Résout l'URL de base depuis les headers de la requête entrante ─────────────
+// Évite de hard-coder l'URL Render (qui a des cold starts) dans les balises og:image.
+// Quand le bot fait la requête, on utilise le même host pour l'image OG.
+function resolveBaseUrl(): string {
+  try {
+    const h     = headers();
+    const host  = h.get('host') ?? '';
+    const proto = h.get('x-forwarded-proto') ?? 'https';
+    if (host) return `${proto}://${host}`;
+  } catch { /* headers() peut lever hors contexte */ }
+  return (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://easyorder-backend-wnku.onrender.com').replace(/\/$/, '');
+}
 
 // ── Metadata dynamique (injectées dans <head> par Next.js App Router) ─────────
 export async function generateMetadata(
@@ -44,17 +56,33 @@ export async function generateMetadata(
     };
   }
 
-  const ogImage    = `${BASE_URL}/api/og/shop/${params.slug}`;
-  const shopUrl    = `${ANGULAR_URL}/shop/${params.slug}`;
-  const logoUrl    = isImageUrl(data.logo) ? data.logo : ogImage;
-  const siteDesc   = data.description?.trim()
+  const baseUrl  = resolveBaseUrl();
+  const ogImage  = `${baseUrl}/api/og/shop/${params.slug}`;
+  const shopUrl  = `${ANGULAR_URL}/shop/${params.slug}`;
+  const siteDesc = data.description?.trim()
     || `Découvrez les produits de ${data.name}${data.address ? ` — ${data.address}` : ''}. Commandez facilement via WhatsApp.`;
 
   // LinkedIn préfère ≤ 200 chars
   const shortDesc = siteDesc.length > 200 ? siteDesc.slice(0, 197) + '…' : siteDesc;
 
+  // ── Images OG : grille produits (1200×630) + logo en fallback ─────────────
+  // Certains crawlers (Facebook Lite, WhatsApp messages) ont un timeout court.
+  // Si la génération de l'image dynamique est trop lente, le logo sert de fallback.
+  const ogImages: { url: string; width: number; height: number; alt: string; type?: string }[] = [
+    {
+      url:    ogImage,
+      width:  1200,
+      height: 630,
+      alt:    `${data.name} — Aperçu boutique et produits`,
+      type:   'image/png',
+    },
+  ];
+  if (isImageUrl(data.logo)) {
+    ogImages.push({ url: data.logo, width: 400, height: 400, alt: data.name });
+  }
+
   return {
-    metadataBase: new URL(BASE_URL),
+    metadataBase: new URL(baseUrl),
 
     // ── Titre ──────────────────────────────────────────────────────────────
     title:       `${data.name} | JeCréeMaBoutique`,
@@ -68,15 +96,7 @@ export async function generateMetadata(
       locale:      'fr_FR',
       title:       `${data.name} — Boutique en ligne`,
       description: shortDesc,
-      images: [
-        {
-          url:    ogImage,
-          width:  1200,
-          height: 630,
-          alt:    `${data.name} — Aperçu boutique et produits`,
-          type:   'image/png',
-        },
-      ],
+      images:      ogImages,
     },
 
     // ── Twitter / X Cards ─────────────────────────────────────────────────
@@ -102,8 +122,7 @@ export async function generateMetadata(
       follow: false,
     },
 
-    // ── Autres ────────────────────────────────────────────────────────────
-    // og:image:secure_url est lu par Slack
+    // ── Slack lit og:image:secure_url ─────────────────────────────────────
     other: {
       'og:image:secure_url': ogImage,
     },
@@ -125,7 +144,7 @@ export default async function ShopOGPage(
   if (!result.isBot) redirect(`${ANGULAR_URL}/shop/${params.slug}`);
 
   const shopUrl    = `${ANGULAR_URL}/shop/${params.slug}`;
-  const ogImage    = `${BASE_URL}/api/og/shop/${params.slug}`;
+  const ogImage    = `${resolveBaseUrl()}/api/og/shop/${params.slug}`;
   const description = data.description?.trim()
     || `Découvrez les produits de ${data.name}. Commandez facilement via WhatsApp.`;
 

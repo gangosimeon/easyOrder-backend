@@ -46,6 +46,7 @@ export async function GET(
       name:        shop.name,
       slug:        shop.slug,
       phone:       shop.phone,
+      fullPhone:   shop.fullPhone,
       description: shop.description,
       address:     shop.address,
       logo:        shop.logo,

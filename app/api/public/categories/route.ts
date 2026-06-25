@@ -25,9 +25,11 @@ export async function GET() {
       {
         $match: {
           '_shop.role':     'user',
-          '_shop.isActive': { $ne: false },
+          '_shop.isActive': true,
         },
       },
+      // Trier par date de mise à jour pour que $first retourne la version la plus récente
+      { $sort: { updatedAt: -1 } },
       // Dédoublonner par nom de catégorie
       {
         $group: {
@@ -51,7 +53,7 @@ export async function GET() {
 
     return NextResponse.json(
       { success: true, data },
-      { headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=30' } }
+      { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch {
     return res.serverError();

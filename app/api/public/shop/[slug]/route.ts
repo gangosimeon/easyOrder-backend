@@ -1,7 +1,8 @@
-import { connectDB } from '@/lib/db';
-import * as res from '@/lib/api-response';
-import { NextResponse } from 'next/server';
-import User from '@/models/user.model';
+import { connectDB }      from '@/lib/db';
+import * as res           from '@/lib/api-response';
+import { NextResponse }   from 'next/server';
+import User               from '@/models/user.model';
+import { dialCodeToName } from '@/lib/country-utils';
 import Category from '@/models/category.model';
 import Product from '@/models/product.model';
 import { getActiveAnnoncesByShop } from '@/services/annonce.service';
@@ -41,6 +42,7 @@ export async function GET(
 
     const productTotal = await Product.countDocuments({ shopId });
 
+    const shopCountryCode = shop.countryCode ?? '';
     const company = {
       id:          shopId,
       name:        shop.name,
@@ -51,6 +53,9 @@ export async function GET(
       address:     shop.address,
       logo:        shop.logo,
       coverColor:  shop.coverColor,
+      countryCode: shopCountryCode,
+      // `country` calculé dynamiquement — jamais stocké en MongoDB
+      country:     dialCodeToName(shopCountryCode) ?? '',
     };
 
     return NextResponse.json(

@@ -193,7 +193,7 @@ export async function GET(req: Request) {
         slug:         String(s.slug       ?? ''),
         address:      String(s.address    ?? ''),
         logo:         String(s.logo       ?? ''),
-        coverColor:   String(s.coverColor ?? '#E8521A'),
+        coverColor:   String(s.coverColor ?? '#008060'),
         countryCode:  code,
         country:      dialCodeToName(code) ?? '',
         productCount: Number(s.productCount ?? 0),
@@ -201,7 +201,7 @@ export async function GET(req: Request) {
         categories: Array.isArray(s.categories)
           ? (s.categories as ShopCategory[]).map(c => ({
               name:  String(c.name  ?? ''),
-              color: String(c.color ?? '#FF6B35'),
+              color: String(c.color ?? '#008060'),
               icon:  String(c.icon  ?? 'inventory_2'),
             }))
           : [],

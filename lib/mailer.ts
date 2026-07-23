@@ -63,7 +63,7 @@ function getEmailTemplate(otp: string, type: OtpType): string {
             margin-bottom: 30px;
             font-size: 24px;
             font-weight: bold;
-            color: #e8521a;
+            color: #008060;
           }
           .title {
             text-align: center;

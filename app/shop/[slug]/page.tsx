@@ -194,7 +194,7 @@ export default async function ShopOGPage(
   // ── Constantes visuelles ──────────────────────────────────────────────────
   const brandColor = /^#[0-9a-fA-F]{6}$/.test(data.coverColor ?? '')
     ? data.coverColor
-    : '#e8521a';
+    : '#008060';
 
   return (
     <>

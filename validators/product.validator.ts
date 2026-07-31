@@ -8,7 +8,7 @@ export const createProductSchema = z.object({
   promotion:     z.number().min(0).max(100).optional(),
   image:         z.string().default(''),
   description:   z.string().max(500).default(''),
-  unit:          z.string().default('pièce'),
+  unit:          z.string().default(''),
   stock:         z.number().min(0).default(0),
   inStock:       z.boolean().default(true),
 });

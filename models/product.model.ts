@@ -26,7 +26,7 @@ const productSchema = new Schema<IProduct>(
     promotion:     { type: Number, min: 0, max: 100 },
     image:         { type: String, default: '' },
     description:   { type: String, default: '' },
-    unit:          { type: String, default: 'pièce' },
+    unit:          { type: String, default: '' },
     stock:         { type: Number, default: 0, min: 0 },
     inStock:       { type: Boolean, default: true },
   },

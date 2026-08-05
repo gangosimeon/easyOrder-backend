@@ -5,8 +5,7 @@
   "scripts": {
     "dev": "next dev --port 4000",
     "build": "next build",
-    "start": "next start --port 4000",
-    "seed": "tsx scripts/seed.ts"
+    "start": "next start --port 4000"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

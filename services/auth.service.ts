@@ -50,6 +50,7 @@ export async function registerUser(
     slug,
     password: hashed,
     role: 'user',
+    isActive: false,
   });
 
   const payload: JWTPayload = {

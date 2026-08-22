@@ -8,6 +8,7 @@ export interface IAnnonce extends Document {
   message: string;
   type: AnnonceType;
   emoji: string;
+  image: string;
   dateDebut: Date;
   dateFin?: Date;
   active: boolean;
@@ -23,6 +24,7 @@ const annonceSchema = new Schema<IAnnonce>(
     message:   { type: String, required: true },
     type:      { type: String, enum: ['promo', 'info', 'alerte', 'evenement'], required: true },
     emoji:     { type: String, default: '📢' },
+    image:     { type: String, default: '' },
     dateDebut: { type: Date, required: true },
     dateFin:   { type: Date },
     active:    { type: Boolean, default: true },

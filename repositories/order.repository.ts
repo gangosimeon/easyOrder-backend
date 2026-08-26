@@ -128,15 +128,24 @@ export class OrderRepository {
   }
 
   /**
-   * Met à jour le statut d'une commande.
+   * Met à jour le statut d'une commande, en filtrant par boutique propriétaire
+   * directement dans la requête (évite toute écriture sur la commande d'un tiers).
    */
-  async updateStatus(orderId: string, status: 'pending' | 'confirmed' | 'delivered' | 'cancelled'): Promise<OrderDocument | null> {
+  async updateStatus(
+    orderId: string,
+    shopId: string,
+    status: 'pending' | 'confirmed' | 'delivered' | 'cancelled'
+  ): Promise<OrderDocument | null> {
     try {
-      if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      if (!mongoose.Types.ObjectId.isValid(orderId) || !mongoose.Types.ObjectId.isValid(shopId)) {
         return null;
       }
       return await this.model
-        .findByIdAndUpdate(orderId, { status }, { new: true })
+        .findOneAndUpdate(
+          { _id: orderId, shopId: new mongoose.Types.ObjectId(shopId) },
+          { status },
+          { new: true }
+        )
         .exec();
     } catch (error) {
       console.error('[OrderRepository.updateStatus] MongoDB error:', error);

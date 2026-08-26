@@ -5,6 +5,12 @@ import { NextResponse }   from 'next/server';
 import { PipelineStage }  from 'mongoose';
 import { dialCodeToName } from '@/lib/country-utils';
 
+// Échappe les métacaractères regex pour éviter le ReDoS via un $regex construit
+// à partir d'une entrée utilisateur non authentifiée (search/category).
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 interface PreviewProduct {
   id:    string;
   image: string;
@@ -66,9 +72,10 @@ export async function GET(req: Request) {
     };
 
     if (search) {
+      const safeSearch = escapeRegExp(search);
       matchStage['$or'] = [
-        { name:    { $regex: search, $options: 'i' } },
-        { address: { $regex: search, $options: 'i' } },
+        { name:    { $regex: safeSearch, $options: 'i' } },
+        { address: { $regex: safeSearch, $options: 'i' } },
       ];
     }
 
@@ -124,7 +131,7 @@ export async function GET(req: Request) {
 
       // Filtre par catégorie si fourni
       ...(category
-        ? [{ $match: { '_cats.name': { $regex: `^${category}$`, $options: 'i' } } } as PipelineStage]
+        ? [{ $match: { '_cats.name': { $regex: `^${escapeRegExp(category)}$`, $options: 'i' } } } as PipelineStage]
         : []),
 
       // ── Construire les champs de sortie ───────────────────────────────────

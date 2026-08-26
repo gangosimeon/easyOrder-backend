@@ -113,6 +113,8 @@ export async function POST(req: Request) {
 
     return res.created(order);
   } catch (err: unknown) {
+    const e = err as { status?: number; message?: string };
+    if (e.status === 400) return res.badRequest(e.message ?? 'Erreur');
     console.error('[POST /api/orders]', err);
     return res.serverError();
   }

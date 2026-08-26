@@ -47,10 +47,6 @@ export async function PATCH(
       Logger.warn('Unauthorized status update attempt', { method: 'PATCH', route: '/api/orders/[id]' });
       return res.unauthorized();
     }
-    if (e.status === 403) {
-      Logger.warn('Forbidden status update attempt', { method: 'PATCH', route: '/api/orders/[id]' });
-      return res.forbidden('Accès non autorisé');
-    }
     if (e.status === 404) {
       return res.notFound('Commande introuvable');
     }

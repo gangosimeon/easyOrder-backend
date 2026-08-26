@@ -46,6 +46,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { v2 as cloudinary } from 'cloudinary';
+import { requireAuthUser } from '@/lib/auth';
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES  = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -59,6 +60,8 @@ cloudinary.config({
 
 export async function POST(request: NextRequest) {
   try {
+    requireAuthUser(request);
+
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
 
@@ -85,6 +88,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ url: result.secure_url });
   } catch (err) {
+    const e = err as { message?: string };
+    if (e.message === 'Non authentifié') {
+      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
+    }
     console.error('[upload] error:', err);
     return NextResponse.json({ error: "Erreur lors de l'upload" }, { status: 500 });
   }

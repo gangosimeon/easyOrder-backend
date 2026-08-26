@@ -53,7 +53,7 @@ export async function GET() {
 
     return NextResponse.json(
       { success: true, data },
-      { headers: { 'Cache-Control': 'no-store' } }
+      { headers: { 'Cache-Control': 'public, max-age=300' } }
     );
   } catch {
     return res.serverError();

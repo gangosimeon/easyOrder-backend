@@ -1,3 +1,9 @@
+// Échappe les métacaractères regex pour éviter le ReDoS via un $regex construit
+// à partir d'une entrée utilisateur (search, admin).
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export interface ShopsFilter {
   search?:   string;
   dateFrom?: string;
@@ -25,10 +31,11 @@ export function buildBaseMatchStage(filter: ShopsFilter): Record<string, unknown
   const match: Record<string, unknown> = { role: 'user' };
 
   if (filter.search?.trim()) {
+    const safeSearch = escapeRegExp(filter.search.trim());
     match.$or = [
-      { name:  { $regex: filter.search.trim(), $options: 'i' } },
-      { slug:  { $regex: filter.search.trim(), $options: 'i' } },
-      { phone: { $regex: filter.search.trim(), $options: 'i' } },
+      { name:  { $regex: safeSearch, $options: 'i' } },
+      { slug:  { $regex: safeSearch, $options: 'i' } },
+      { phone: { $regex: safeSearch, $options: 'i' } },
     ];
   }
 

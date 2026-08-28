@@ -47,6 +47,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v2 as cloudinary } from 'cloudinary';
 import { requireAuthUser } from '@/lib/auth';
+import { checkRateLimit } from '@/lib/tracking-guard';
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES  = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -60,7 +61,12 @@ cloudinary.config({
 
 export async function POST(request: NextRequest) {
   try {
-    requireAuthUser(request);
+    const authUser = await requireAuthUser(request);
+
+    // Quota anti-abus (coût/stockage Cloudinary) : 20 uploads / heure / utilisateur.
+    if (checkRateLimit(`upload:${authUser.userId}`, 20, 60 * 60_000)) {
+      return NextResponse.json({ error: 'Trop d\'uploads, réessayez plus tard' }, { status: 429 });
+    }
 
     const formData = await request.formData();
     const file = formData.get('file') as File | null;

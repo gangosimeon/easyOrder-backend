@@ -10,7 +10,7 @@ import {
 export async function GET(req: Request) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const { searchParams } = new URL(req.url);
     const page  = Math.max(1, parseInt(searchParams.get('page')  ?? '1'));
@@ -30,7 +30,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await connectDB();
-    const admin  = requireAdmin(req);
+    const admin  = await requireAdmin(req);
     const body   = await req.json();
     const parsed = createAnnouncementSchema.safeParse(body);
 

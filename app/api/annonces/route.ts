@@ -7,7 +7,7 @@ import { getAnnoncesByShop, createAnnonce } from '@/services/annonce.service';
 export async function GET(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     const annonces = await getAnnoncesByShop(authUser.userId);
     return res.ok(annonces);
   } catch (err: unknown) {
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     const body = await req.json();
     const parsed = createAnnonceSchema.safeParse(body);

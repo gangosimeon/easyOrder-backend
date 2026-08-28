@@ -9,7 +9,7 @@ export async function PATCH(
 ) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const doc = await toggleAnnouncement(params.id);
     return res.ok(doc);

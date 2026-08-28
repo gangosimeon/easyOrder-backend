@@ -9,7 +9,7 @@ export async function PATCH(
 ) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const body = await req.json() as { isActive?: boolean };
     if (typeof body.isActive !== 'boolean') {

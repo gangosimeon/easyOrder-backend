@@ -34,6 +34,7 @@
 
 import { ImageResponse } from 'next/og';
 import { ogFonts }       from '@/lib/og-fonts';
+import { isSafeExternalImageUrl } from '@/lib/safe-url';
 import type { NextRequest } from 'next/server';
 
 // ── Edge runtime : cold starts rapides, déploiement mondial ───────────────────
@@ -105,6 +106,9 @@ const fmtPrice = (n: number) => new Intl.NumberFormat('fr-FR').format(n) + ' FCF
 // Satori peut échouer à charger des images externes depuis l'edge runtime.
 // En les convertissant en data URL avant le rendu, on garantit leur affichage.
 async function fetchImage(url: string): Promise<string | null> {
+  // Re-vérifié ici (pas seulement à l'écriture) : filet de sécurité si une
+  // valeur non conforme existait déjà en base avant l'ajout de la validation.
+  if (!isSafeExternalImageUrl(url)) return null;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4_000);

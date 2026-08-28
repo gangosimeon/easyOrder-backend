@@ -36,6 +36,7 @@ const PUBLIC_API_PREFIXES = [
   '/api/auth/forgot-password',   // Réinitialisation mot de passe
   '/api/auth/verify-otp',        // Vérification OTP
   '/api/auth/reset-password',    // Nouveau mot de passe
+  '/api/auth/refresh',           // Authentifié par refresh token dans le body, pas par Bearer
   '/api/public',          // Données boutique publiques
   '/api/orders',          // Commandes (créées sans compte)
   '/api/swagger',

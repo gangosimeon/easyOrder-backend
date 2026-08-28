@@ -14,8 +14,8 @@ export async function POST(req: Request) {
       return res.badRequest('Données invalides', parsed.error.flatten().fieldErrors);
     }
 
-    const { user, token } = await registerUser(parsed.data);
-    return res.created({ user, token });
+    const { user, token, refreshToken } = await registerUser(parsed.data);
+    return res.created({ user, token, refreshToken });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
     if (e.status === 409) return res.conflict(e.message ?? 'Conflit');

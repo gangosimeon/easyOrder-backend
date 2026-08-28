@@ -9,7 +9,7 @@ export async function GET(
 ) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const stats = await getAdminShopStats(params.id);
 

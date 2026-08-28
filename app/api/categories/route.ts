@@ -7,7 +7,7 @@ import { getCategoriesByShop, createCategory } from '@/services/category.service
 export async function GET(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     const categories = await getCategoriesByShop(authUser.userId);
     return res.ok(categories);
   } catch (err: unknown) {
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     const body = await req.json();
     const parsed = createCategorySchema.safeParse(body);

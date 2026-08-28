@@ -1,4 +1,12 @@
-export async function GET() {
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const key = searchParams.get('key') ?? '';
+  const expected = process.env.SWAGGER_ACCESS_KEY;
+
+  if (!expected || key !== expected) {
+    return new Response('Not found', { status: 404 });
+  }
+
   const html = `<!DOCTYPE html>
 <html lang="fr">
   <head>
@@ -17,7 +25,7 @@ export async function GET() {
     <script>
       window.onload = function () {
         SwaggerUIBundle({
-          url: '/api/swagger',
+          url: '/api/swagger?key=${encodeURIComponent(key)}',
           dom_id: '#swagger-ui',
           presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
           layout: 'StandaloneLayout',

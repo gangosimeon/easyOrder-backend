@@ -7,7 +7,7 @@ import { updateProfileSchema } from '@/validators/auth.validator';
 export async function GET(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     const user = await getUserById(authUser.userId);
     return res.ok(user);
   } catch (err: unknown) {
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
 export async function PUT(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     const body = await req.json();
     const parsed = updateProfileSchema.safeParse(body);

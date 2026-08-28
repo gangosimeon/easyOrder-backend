@@ -11,7 +11,7 @@ export async function PATCH(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     // Parse and validate request body
     const body = await req.json();

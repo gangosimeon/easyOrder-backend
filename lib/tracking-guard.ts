@@ -24,16 +24,30 @@ const RATE_MAX_HITS  = 15;       // max requests per IP per window
 const rateMap = new Map<string, number[]>();
 
 export function isRateLimited(ip: string): boolean {
-  const now        = Date.now();
-  const cutoff     = now - RATE_WINDOW_MS;
-  const timestamps = (rateMap.get(ip) ?? []).filter(t => t > cutoff);
+  return checkRateLimit(ip, RATE_MAX_HITS, RATE_WINDOW_MS);
+}
 
-  if (timestamps.length >= RATE_MAX_HITS) {
-    rateMap.set(ip, timestamps);   // keep pruned list, don't add
+export function getClientIp(req: Request): string {
+  const ipRaw = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? 'unknown';
+  return ipRaw.split(',')[0].trim();
+}
+
+/**
+ * Limiteur générique à fenêtre glissante, en mémoire, clé arbitraire.
+ * Note : se réinitialise au redémarrage/cold start (acceptable pour un
+ * serveur unique ; pour du multi-instance en production, remplacer par Redis).
+ */
+export function checkRateLimit(key: string, maxHits: number, windowMs: number): boolean {
+  const now        = Date.now();
+  const cutoff     = now - windowMs;
+  const timestamps = (rateMap.get(key) ?? []).filter(t => t > cutoff);
+
+  if (timestamps.length >= maxHits) {
+    rateMap.set(key, timestamps);   // keep pruned list, don't add
     return true;
   }
 
   timestamps.push(now);
-  rateMap.set(ip, timestamps);
+  rateMap.set(key, timestamps);
   return false;
 }

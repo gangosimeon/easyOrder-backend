@@ -14,7 +14,7 @@ export async function GET(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     const product = await getProductById(params.id, authUser.userId);
     return res.ok(product);
   } catch (err: unknown) {
@@ -31,7 +31,7 @@ export async function PUT(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     const body = await req.json();
     const parsed = updateProductSchema.safeParse(body);
@@ -56,7 +56,7 @@ export async function DELETE(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     await deleteProduct(params.id, authUser.userId);
     return res.ok({ message: 'Produit supprimé' });
   } catch (err: unknown) {

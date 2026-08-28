@@ -28,6 +28,10 @@ export function conflict(message: string) {
   return NextResponse.json({ success: false, message }, { status: 409 });
 }
 
+export function tooManyRequests(message = 'Trop de tentatives, réessayez plus tard') {
+  return NextResponse.json({ success: false, message }, { status: 429 });
+}
+
 export function serverError(message = 'Erreur serveur interne') {
   return NextResponse.json({ success: false, message }, { status: 500 });
 }

@@ -7,7 +7,7 @@ import { getProductsByShop, createProduct } from '@/services/product.service';
 export async function GET(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     const { searchParams } = new URL(req.url);
     const categoryId = searchParams.get('categoryId') ?? undefined;
@@ -24,7 +24,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     const body = await req.json();
     const parsed = createProductSchema.safeParse(body);

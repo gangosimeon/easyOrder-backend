@@ -14,7 +14,7 @@ export async function GET(
 ) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const doc = await getAnnouncementById(params.id);
     if (!doc) return res.notFound('Annonce introuvable');
@@ -35,7 +35,7 @@ export async function PUT(
 ) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const body   = await req.json();
     const parsed = updateAnnouncementSchema.safeParse(body);
@@ -62,7 +62,7 @@ export async function DELETE(
 ) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     await deleteAnnouncement(params.id);
     return res.ok({ deleted: true });

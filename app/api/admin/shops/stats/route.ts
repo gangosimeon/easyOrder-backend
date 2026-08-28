@@ -6,7 +6,7 @@ import { getAggregateShopStats } from '@/services/admin-shop.service';
 export async function GET(req: Request) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const stats = await getAggregateShopStats();
 

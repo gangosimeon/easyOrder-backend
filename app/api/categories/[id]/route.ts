@@ -14,7 +14,7 @@ export async function GET(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     const category = await getCategoryById(params.id, authUser.userId);
     return res.ok(category);
   } catch (err: unknown) {
@@ -31,7 +31,7 @@ export async function PUT(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     const body = await req.json();
     const parsed = updateCategorySchema.safeParse(body);
@@ -55,7 +55,7 @@ export async function DELETE(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     await deleteCategory(params.id, authUser.userId);
     return res.ok({ message: 'Catégorie et ses produits supprimés' });
   } catch (err: unknown) {

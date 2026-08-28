@@ -14,6 +14,7 @@ export interface AdminShopDTO {
   name:         string;
   slug:         string;
   phone:        string;
+  fullPhone?:   string;
   description:  string;
   logo:         string;
   address:      string;
@@ -22,6 +23,7 @@ export interface AdminShopDTO {
   productCount: number;
   status:       'active' | 'inactive';
   isActive:     boolean;
+  banned:       boolean;
   publicUrl:    string;
 }
 
@@ -53,6 +55,7 @@ function toDTO(shop: Record<string, unknown>, baseUrl: string): AdminShopDTO {
     name:         String(shop.name         ?? ''),
     slug:         String(shop.slug         ?? ''),
     phone:        String(shop.phone        ?? ''),
+    fullPhone:    shop.fullPhone ? String(shop.fullPhone) : undefined,
     description:  String(shop.description  ?? ''),
     logo:         String(shop.logo         ?? ''),
     address:      String(shop.address      ?? ''),
@@ -61,6 +64,7 @@ function toDTO(shop: Record<string, unknown>, baseUrl: string): AdminShopDTO {
     productCount: Number(shop.productCount ?? 0),
     status:       (shop.status as 'active' | 'inactive') ?? 'inactive',
     isActive:     shop.isActive !== false,
+    banned:       shop.banned === true,
     publicUrl:    `${baseUrl}/shop/${String(shop.slug ?? '')}`,
   };
 }

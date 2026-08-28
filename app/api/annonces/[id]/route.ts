@@ -14,7 +14,7 @@ export async function GET(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     const annonce = await getAnnonceById(params.id, authUser.userId);
     return res.ok(annonce);
   } catch (err: unknown) {
@@ -31,7 +31,7 @@ export async function PUT(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     const body = await req.json();
     const parsed = updateAnnonceSchema.safeParse(body);
@@ -55,7 +55,7 @@ export async function DELETE(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     await deleteAnnonce(params.id, authUser.userId);
     return res.ok({ message: 'Annonce supprimée' });
   } catch (err: unknown) {

@@ -9,7 +9,7 @@ export async function PATCH(
 ) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
     const annonce = await toggleAnnonceEpinglee(params.id, authUser.userId);
     return res.ok(annonce);
   } catch (err: unknown) {

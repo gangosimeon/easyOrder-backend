@@ -7,7 +7,7 @@ import { listAdminShops } from '@/services/admin-shop.service';
 export async function GET(req: Request) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const { searchParams, origin } = new URL(req.url);
     const parsed = listShopsQuerySchema.safeParse(Object.fromEntries(searchParams));

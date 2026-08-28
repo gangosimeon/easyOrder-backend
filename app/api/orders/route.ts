@@ -9,7 +9,7 @@ import User from '@/models/user.model';
 export async function GET(req: Request) {
   try {
     await connectDB();
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     // Pagination params
     const { searchParams } = new URL(req.url, 'http://localhost');

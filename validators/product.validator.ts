@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isSafeExternalImageUrl } from '@/lib/safe-url';
 
 export const createProductSchema = z.object({
   categoryId:    z.string().min(1, 'La catégorie est requise'),
@@ -6,7 +7,7 @@ export const createProductSchema = z.object({
   price:         z.number({ required_error: 'Le prix est requis' }).min(0, 'Prix invalide'),
   originalPrice: z.number().min(0).optional(),
   promotion:     z.number().min(0).max(100).optional(),
-  image:         z.string().default(''),
+  image:         z.string().refine(isSafeExternalImageUrl, "URL d'image non autorisée").default(''),
   description:   z.string().max(500).default(''),
   unit:          z.string().default(''),
   stock:         z.number().min(0).default(0),

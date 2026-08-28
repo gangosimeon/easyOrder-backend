@@ -11,7 +11,7 @@ export async function GET(
   try {
     await connectDB();
 
-    const authUser = requireAuthUser(req);
+    const authUser = await requireAuthUser(req);
 
     if (authUser.userId !== params.shopId) {
       return res.forbidden();

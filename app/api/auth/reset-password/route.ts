@@ -28,9 +28,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'Utilisateur introuvable' }, { status: 404 });
     }
 
-    // Hasher et sauvegarder
+    // Hasher, sauvegarder et invalider toutes les sessions existantes — un
+    // mot de passe réinitialisé doit couper l'accès à tout token déjà émis.
     const hashed = await bcrypt.hash(newPassword, 12);
     user.password = hashed;
+    user.refreshTokens = [];
+    user.tokenVersion += 1;
     await user.save();
 
     return NextResponse.json({

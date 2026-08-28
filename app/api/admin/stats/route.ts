@@ -8,7 +8,7 @@ import Order from '@/models/order.model';
 export async function GET(req: Request) {
   try {
     await connectDB();
-    requireAdmin(req);
+    await requireAdmin(req);
 
     const now          = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);

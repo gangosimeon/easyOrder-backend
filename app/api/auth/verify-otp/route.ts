@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { signResetToken } from '@/lib/auth';
 import User from '@/models/user.model';
+import { checkRateLimit, getClientIp } from '@/lib/tracking-guard';
 
 export async function POST(req: Request) {
   try {
@@ -13,6 +14,14 @@ export async function POST(req: Request) {
 
     if (!email || !otp) {
       return NextResponse.json({ success: false, message: 'Email et code requis' }, { status: 400 });
+    }
+
+    // Un OTP à 6 chiffres (900k combinaisons) doit être verrouillé bien avant
+    // d'être épuisable par force brute pendant sa fenêtre de validité (5 min).
+    const ip = getClientIp(req);
+    if (checkRateLimit(`verify-otp:ip:${ip}`, 20, 10 * 60_000) ||
+        checkRateLimit(`verify-otp:email:${email}`, 5, 15 * 60_000)) {
+      return NextResponse.json({ success: false, message: 'Trop de tentatives, réessayez plus tard' }, { status: 429 });
     }
 
     const user = await User.findOne({ recoveryEmail: email });

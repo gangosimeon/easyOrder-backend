@@ -13,6 +13,11 @@ export interface IUser extends Document {
   coverColor: string;
   role: 'admin' | 'user';
   isActive: boolean;
+  /** Suspension par un administrateur — distinct de isActive (visibilité publique / approbation). */
+  banned: boolean;
+  /** Incrémentée à la déconnexion et au changement de mot de passe pour révoquer instantanément tous les access tokens déjà émis. */
+  tokenVersion: number;
+  refreshTokens: { tokenHash: string; expiresAt: Date }[];
   recoveryEmail?: string;
   recoveryEmailVerified: boolean;
   recoveryOtp?: string;
@@ -30,13 +35,23 @@ const userSchema = new Schema<IUser>(
     phone:       { type: String, required: true, unique: true, trim: true },
     countryCode: { type: String, trim: true },
     fullPhone:   { type: String, trim: true, sparse: true },
-    password:    { type: String, required: true },
+    password:    { type: String, required: true, select: false },
     description: { type: String, default: '' },
     logo:        { type: String, default: '🏪' },
     address:     { type: String, default: '' },
     coverColor:  { type: String, default: '#a04343' },
     role:        { type: String, enum: ['admin', 'user'], default: 'user' },
     isActive:    { type: Boolean, default: true },
+    banned:      { type: Boolean, default: false },
+    tokenVersion: { type: Number, default: 0 },
+    refreshTokens: {
+      type: [{
+        tokenHash: { type: String, required: true },
+        expiresAt: { type: Date, required: true },
+        _id: false,
+      }],
+      default: [],
+    },
     recoveryEmail: { type: String, trim: true, lowercase: true },
     recoveryEmailVerified: { type: Boolean, default: false },
     recoveryOtp: { type: String },

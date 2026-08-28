@@ -40,7 +40,8 @@ const nextConfig = {
         ],
       },
 
-      // ── Headers sécurité pour les pages SSR shop ────────────────────────────
+      // ── Headers sécurité pour les pages SSR shop (servies aux bots/crawlers
+      //    uniquement — un vrai visiteur est redirigé vers l'app Angular) ─────
       {
         source: '/shop/:slug*',
         headers: [
@@ -48,6 +49,15 @@ const nextConfig = {
           { key: 'X-Frame-Options',        value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy',        value: 'strict-origin-when-cross-origin' },
+          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' https: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" },
+        ],
+      },
+
+      // ── CSP pour la doc Swagger (nécessite unpkg.com pour l'UI CDN) ─────────
+      {
+        source: '/swagger',
+        headers: [
+          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" },
         ],
       },
     ];

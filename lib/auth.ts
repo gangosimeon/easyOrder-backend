@@ -1,4 +1,7 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import { connectDB } from '@/lib/db';
+import User from '@/models/user.model';
 
 function getSecret(): string {
   const s = process.env.JWT_SECRET;
@@ -6,19 +9,22 @@ function getSecret(): string {
   return s;
 }
 
-function getExpiresIn(): string {
-  return process.env.JWT_EXPIRES_IN || '7d';
+function getAccessExpiresIn(): string {
+  return process.env.JWT_EXPIRES_IN || '30m';
 }
+
+const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 jours
 
 export interface JWTPayload {
   userId: string;
   phone: string;
   role: 'admin' | 'user';
   slug: string;
+  tokenVersion: number;
 }
 
 export function signToken(payload: JWTPayload): string {
-  return jwt.sign(payload, getSecret(), { expiresIn: getExpiresIn() } as jwt.SignOptions);
+  return jwt.sign(payload, getSecret(), { expiresIn: getAccessExpiresIn() } as jwt.SignOptions);
 }
 
 export function signResetToken(userId: string): string {
@@ -35,25 +41,57 @@ export function verifyToken(token: string): JWTPayload {
   return jwt.verify(token, getSecret()) as JWTPayload;
 }
 
-export function getAuthUser(req: Request): JWTPayload | null {
+// ── Refresh tokens ─────────────────────────────────────────────────────────
+// Opaques (pas des JWT), stockés hashés (SHA-256) en base sur le document
+// User, à rotation unique : chaque utilisation invalide l'ancien et en émet
+// un nouveau. `tokenVersion` permet en plus de révoquer instantanément tous
+// les access tokens déjà émis (déconnexion, changement de mot de passe).
+
+export function generateRefreshToken(): string {
+  return crypto.randomBytes(48).toString('hex');
+}
+
+export function hashRefreshToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+export function refreshTokenExpiry(): Date {
+  return new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+}
+
+// ── Vérification des requêtes authentifiées ───────────────────────────────
+// Le JWT seul ne peut pas refléter une révocation décidée après son émission
+// (bannissement, déconnexion, changement de mot de passe) : on recharge donc
+// l'utilisateur en base à chaque requête pour appliquer ces révocations
+// immédiatement, plutôt que d'attendre l'expiration naturelle du token.
+
+export async function getAuthUser(req: Request): Promise<JWTPayload | null> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) return null;
   const token = authHeader.split(' ')[1];
+
+  let payload: JWTPayload;
   try {
-    return verifyToken(token);
+    payload = verifyToken(token);
   } catch {
     return null;
   }
+
+  await connectDB();
+  const user = await User.findById(payload.userId).select('banned tokenVersion').lean();
+  if (!user || user.banned || user.tokenVersion !== payload.tokenVersion) return null;
+
+  return payload;
 }
 
-export function requireAuthUser(req: Request): JWTPayload {
-  const user = getAuthUser(req);
+export async function requireAuthUser(req: Request): Promise<JWTPayload> {
+  const user = await getAuthUser(req);
   if (!user) throw new Error('Non authentifié');
   return user;
 }
 
-export function requireAdmin(req: Request): JWTPayload {
-  const user = requireAuthUser(req);
+export async function requireAdmin(req: Request): Promise<JWTPayload> {
+  const user = await requireAuthUser(req);
   if (user.role !== 'admin') throw new Error('Accès réservé aux administrateurs');
   return user;
 }

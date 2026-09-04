@@ -23,7 +23,7 @@ const BOT_PATTERNS = [
   'snapchat', 'viber', 'vkshare',
   // Moteurs de recherche
   'googlebot', 'google-inspectiontool',
-  'bingbot', 'duckduckbot', 'applebot', 'yandexbot', 'baiduspider',
+  'bingbot', 'msnbot', 'duckduckbot', 'applebot', 'yandexbot', 'baiduspider',
   // Outils d'aperçu
   'iframely', 'w3c_validator',
   // Génériques (en dernier)

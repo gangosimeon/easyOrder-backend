@@ -50,7 +50,7 @@ export async function generateMetadata(
 
   if (!data) {
     return {
-      title:       'Boutique introuvable | JeCréeMaBoutique',
+      title:       'Boutique introuvable',
       description: 'Cette boutique n\'existe pas ou a été supprimée.',
       robots:      { index: false, follow: false },
     };
@@ -85,7 +85,9 @@ export async function generateMetadata(
     metadataBase: new URL(baseUrl),
 
     // ── Titre ──────────────────────────────────────────────────────────────
-    title:       `${data.name} | JeCréeMaBoutique`,
+    // Le suffixe "| JeCréeMaBoutique" est ajouté automatiquement par le
+    // template défini dans app/layout.tsx — ne pas le répéter ici.
+    title:       data.name,
     description: shortDesc,
 
     // ── Open Graph — standard + Facebook / WhatsApp / Telegram / LinkedIn ──
@@ -116,10 +118,11 @@ export async function generateMetadata(
       canonical: shopUrl,
     },
 
-    // ── Ne jamais indexer cette page proxy (Angular est la vraie page) ─────
+    // ── Indexable : c'est la seule version de cette URL que les moteurs de
+    // recherche peuvent réellement lire (Angular est un SPA sans SSR) ──────
     robots: {
-      index:  false,
-      follow: false,
+      index:  true,
+      follow: true,
     },
 
     // ── Slack lit og:image:secure_url ─────────────────────────────────────
@@ -185,7 +188,7 @@ export default async function ShopOGPage(
       '@type':           'BreadcrumbList',
       itemListElement: [
         { '@type': 'ListItem', position: 1, name: 'Accueil',  item: ANGULAR_URL },
-        { '@type': 'ListItem', position: 2, name: 'Boutiques',item: `${ANGULAR_URL}/shop` },
+        { '@type': 'ListItem', position: 2, name: 'Boutiques',item: `${ANGULAR_URL}/shops` },
         { '@type': 'ListItem', position: 3, name: data.name,  item: shopUrl },
       ],
     },

@@ -3,6 +3,8 @@ import mongoose, { Document, Model, Schema, Types } from 'mongoose';
 export interface ICategory extends Document {
   shopId: Types.ObjectId;
   name: string;
+  /** name normalisé (trim + lowercase) — usage interne pour l'unicité, jamais affiché. */
+  normalizedName: string;
   icon: string;
   color: string;
   description: string;
@@ -12,16 +14,21 @@ export interface ICategory extends Document {
 
 const categorySchema = new Schema<ICategory>(
   {
-    shopId:      { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    name:        { type: String, required: true, trim: true },
-    icon:        { type: String, default: 'inventory_2' },
-    color:       { type: String, default: '#FF6B35' },
-    description: { type: String, default: '' },
+    shopId:         { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    name:           { type: String, required: true, trim: true },
+    normalizedName: { type: String, required: true },
+    icon:           { type: String, default: 'inventory_2' },
+    color:          { type: String, default: '#FF6B35' },
+    description:    { type: String, default: '' },
   },
   { timestamps: true }
 );
 
 categorySchema.index({ shopId: 1 });
+
+// Une même boutique ne peut pas avoir deux catégories de même nom (insensible
+// à la casse et aux espaces) ; deux boutiques différentes le peuvent.
+categorySchema.index({ shopId: 1, normalizedName: 1 }, { unique: true });
 
 const Category: Model<ICategory> =
   mongoose.models.Category ?? mongoose.model<ICategory>('Category', categorySchema);

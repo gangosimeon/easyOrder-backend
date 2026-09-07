@@ -31,8 +31,9 @@ export async function POST(req: Request) {
     const category = await createCategory(authUser.userId, parsed.data);
     return res.created(category);
   } catch (err: unknown) {
-    const e = err as { message?: string };
+    const e = err as { status?: number; message?: string };
     if (e.message === 'Non authentifié') return res.unauthorized();
+    if (e.status === 409) return res.conflict(e.message ?? 'Conflit');
     return res.serverError();
   }
 }

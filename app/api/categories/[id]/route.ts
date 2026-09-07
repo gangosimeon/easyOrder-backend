@@ -45,6 +45,7 @@ export async function PUT(
     const e = err as { status?: number; message?: string };
     if (e.message === 'Non authentifié') return res.unauthorized();
     if (e.status === 404) return res.notFound(e.message);
+    if (e.status === 409) return res.conflict(e.message ?? 'Conflit');
     return res.serverError();
   }
 }

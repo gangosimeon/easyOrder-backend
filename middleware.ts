@@ -42,6 +42,7 @@ const PUBLIC_API_PREFIXES = [
   '/api/swagger',
   '/api/shops/visit',     // Tracking des visites
   '/api/og',              // OG image + invalidation cache
+  '/api/health',          // Monitoring (UptimeRobot, healthcheck)
 ];
 
 // ── Headers de sécurité ajoutés sur toutes les réponses ──────────────────────

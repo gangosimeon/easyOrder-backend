@@ -1,6 +1,8 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Instancié à la demande : le build Next.js charge ce module sans RESEND_API_KEY
+let resend: Resend | null = null;
+const getResend = () => (resend ??= new Resend(process.env.RESEND_API_KEY));
 
 // Adresse expéditeur — doit correspondre à un domaine vérifié sur resend.com
 // En attendant la vérification du domaine, utilise onboarding@resend.dev pour tester
@@ -165,7 +167,7 @@ export async function sendOtpEmail(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const config = otpMessages[type];
-    const { error } = await resend.emails.send({
+    const { error } = await getResend().emails.send({
       from: FROM_ADDRESS,
       to,
       subject: config.subject,

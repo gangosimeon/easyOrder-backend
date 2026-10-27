@@ -1,39 +1,39 @@
 name: Build & Deploy
 
 on:
-push:
+  push:
     branches: [main]
 
 jobs:
-deploy:
+  deploy:
     runs-on: ubuntu-latest
     permissions:
-     contents: read
-     packages: write
+      contents: read
+      packages: write
     steps:
-     - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-     - uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
-         registry: ghcr.io
-         username: ${{ github.actor }}
-         password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-     - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
-         context: .
-         push: true
-         tags: ghcr.io/gangosimeon/easyorder-backend:latest
-         build-args: |
+          context: .
+          push: true
+          tags: ghcr.io/gangosimeon/easyorder-backend:latest
+          build-args: |
             NEXT_PUBLIC_BASE_URL=https://easyorder-mzaka.duckdns.org
 
-     - uses: appleboy/ssh-action@v1
+      - uses: appleboy/ssh-action@v1
         with:
-         host: ${{ secrets.SSH_HOST }}
-         port: 4422
-         username: ${{ secrets.SSH_USER }}
-         key: ${{ secrets.SSH_KEY }}
-         script: |
+          host: ${{ secrets.SSH_HOST }}
+          port: 4422
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
             cd ~/apps/easyorder
             docker compose pull
             docker compose up -d

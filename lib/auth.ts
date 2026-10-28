@@ -27,12 +27,14 @@ export function signToken(payload: JWTPayload): string {
   return jwt.sign(payload, getSecret(), { expiresIn: getAccessExpiresIn() } as jwt.SignOptions);
 }
 
-export function signResetToken(userId: string): string {
-  return jwt.sign({ userId, purpose: 'reset-password' }, getSecret(), { expiresIn: '15m' } as jwt.SignOptions);
+// Le token de réinitialisation embarque tokenVersion : la réinitialisation
+// incrémente cette version, ce qui rend le token inutilisable une seconde fois.
+export function signResetToken(userId: string, tokenVersion: number): string {
+  return jwt.sign({ userId, tokenVersion, purpose: 'reset-password' }, getSecret(), { expiresIn: '15m' } as jwt.SignOptions);
 }
 
-export function verifyResetToken(token: string): { userId: string; purpose: string } {
-  const payload = jwt.verify(token, getSecret()) as { userId: string; purpose: string };
+export function verifyResetToken(token: string): { userId: string; tokenVersion: number; purpose: string } {
+  const payload = jwt.verify(token, getSecret()) as { userId: string; tokenVersion: number; purpose: string };
   if (payload.purpose !== 'reset-password') throw new Error('Token invalide');
   return payload;
 }

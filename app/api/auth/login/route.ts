@@ -19,10 +19,10 @@ export async function POST(req: Request) {
     // pour couvrir aussi bien un script automatisé qu'une attaque distribuée
     // visant un seul compte.
     const ip = getClientIp(req);
-    if (checkRateLimit(`login:ip:${ip}`, 30, 10 * 60_000)) {
+    if (await checkRateLimit(`login:ip:${ip}`, 30, 10 * 60_000)) {
       return res.tooManyRequests();
     }
-    if (checkRateLimit(`login:phone:${parsed.data.phone}`, 8, 10 * 60_000)) {
+    if (await checkRateLimit(`login:phone:${parsed.data.phone}`, 8, 10 * 60_000)) {
       return res.tooManyRequests();
     }
 

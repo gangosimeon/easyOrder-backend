@@ -45,6 +45,12 @@ export async function createOrder(shopId: string, data: CreateOrderInput) {
         { status: 400 }
       );
     }
+    if (product.inStock === false) {
+      throw Object.assign(
+        new Error(`« ${product.name} » n'est plus disponible`),
+        { status: 400 }
+      );
+    }
     return {
       productId: item.productId,
       productName: product.name,
@@ -69,14 +75,18 @@ export async function createOrder(shopId: string, data: CreateOrderInput) {
 
   const order = await orderRepository.create(createData);
 
-  // Envoi push notification au propriétaire de la boutique (fire & forget)
-  sendPushToUser(shopId, {
-    title: 'Nouvelle commande reçue 🛒',
-    body:  'Une nouvelle commande vient d\'être passée dans votre boutique.',
-    url:   '/orders',
-  }).catch(err => {
+  // Notification push au propriétaire de la boutique. Attendue (et non lancée
+  // en fire-and-forget) : sur serverless, le travail restant après la réponse
+  // peut être interrompu. Un échec d'envoi n'annule pas la commande.
+  try {
+    await sendPushToUser(shopId, {
+      title: 'Nouvelle commande reçue 🛒',
+      body:  `${data.customerName} — ${total.toLocaleString('fr-FR')} FCFA`,
+      url:   '/orders',
+    });
+  } catch (err) {
     console.error('[createOrder] Erreur envoi push notification:', err);
-  });
+  }
 
   return order;
 }

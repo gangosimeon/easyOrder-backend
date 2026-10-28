@@ -5,6 +5,7 @@ import * as res from '@/lib/api-response';
 import { createOrderSchema, updateOrderStatusSchema } from '@/validators/order.validator';
 import { getOrdersByShopPaginated, countOrders, countOrdersByShop, createOrder, updateOrderStatus } from '@/services/order.service';
 import User from '@/models/user.model';
+import { checkRateLimit, getClientIp } from '@/lib/tracking-guard';
 
 export async function GET(req: Request) {
   try {
@@ -89,25 +90,33 @@ export async function POST(req: Request) {
   try {
     await connectDB();
 
-    // 1. Validation Zod
-    const body = await req.json();
-    const parsed = createOrderSchema.safeParse(body);
-    if (!parsed.success) {
-      return res.badRequest('Données invalides', parsed.error.flatten().fieldErrors);
-    }
-
-    // 2. Récupérer shopSlug query param
+    // 1. Récupérer shopSlug query param
     const { searchParams } = new URL(req.url, 'http://localhost');
     const shopSlug = searchParams.get('shopSlug');
     if (!shopSlug) {
       return res.badRequest('Le paramètre shopSlug est requis');
     }
 
-    // 3. Trouver la boutique par slug
-    const shop = await User.findOne({ slug: shopSlug }).lean();
+    // 2. Anti-spam : route publique sans compte, chaque commande notifie le
+    //    commerçant. Limite par IP (un robot) et par boutique (une attaque ciblée).
+    const ip = getClientIp(req);
+    if (await checkRateLimit(`order:ip:${ip}`, 10, 10 * 60_000) ||
+        await checkRateLimit(`order:shop:${shopSlug}`, 60, 10 * 60_000)) {
+      return res.tooManyRequests('Trop de commandes en peu de temps, réessayez dans quelques minutes');
+    }
+
+    // 3. Validation Zod
+    const body = await req.json();
+    const parsed = createOrderSchema.safeParse(body);
+    if (!parsed.success) {
+      return res.badRequest('Données invalides', parsed.error.flatten().fieldErrors);
+    }
+
+    // 4. Trouver la boutique par slug — une boutique bannie ne reçoit plus de commandes
+    const shop = await User.findOne({ slug: shopSlug, banned: { $ne: true } }).select('_id').lean();
     if (!shop) return res.notFound('Boutique introuvable');
 
-    // 4. Créer la commande via service (repository)
+    // 5. Créer la commande via service (repository)
     const order = await createOrder(shop._id.toString(), parsed.data);
     console.log(`[POST /api/orders] Order created: ${order._id} for shop ${shopSlug}`);
 

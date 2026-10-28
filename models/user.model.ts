@@ -20,10 +20,15 @@ export interface IUser extends Document {
   refreshTokens: { tokenHash: string; expiresAt: Date }[];
   recoveryEmail?: string;
   recoveryEmailVerified: boolean;
+  /** Email en attente de vérification : ne remplace `recoveryEmail` qu'après validation de l'OTP. */
+  pendingRecoveryEmail?: string;
+  /** Hash SHA-256 de l'OTP (jamais le code en clair). */
   recoveryOtp?: string;
   recoveryOtpExpireAt?: Date;
+  recoveryOtpAttempts: number;
   resetOtp?: string;
   resetOtpExpireAt?: Date;
+  resetOtpAttempts: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,10 +59,15 @@ const userSchema = new Schema<IUser>(
     },
     recoveryEmail: { type: String, trim: true, lowercase: true },
     recoveryEmailVerified: { type: Boolean, default: false },
-    recoveryOtp: { type: String },
-    recoveryOtpExpireAt: { type: Date },
-    resetOtp: { type: String },
-    resetOtpExpireAt: { type: Date },
+    pendingRecoveryEmail: { type: String, trim: true, lowercase: true },
+    // Les champs OTP ne quittent jamais la base : select:false les exclut de
+    // toutes les réponses (me, login, refresh) sauf demande explicite.
+    recoveryOtp: { type: String, select: false },
+    recoveryOtpExpireAt: { type: Date, select: false },
+    recoveryOtpAttempts: { type: Number, default: 0, select: false },
+    resetOtp: { type: String, select: false },
+    resetOtpExpireAt: { type: Date, select: false },
+    resetOtpAttempts: { type: Number, default: 0, select: false },
   },
   { timestamps: true }
 );
@@ -80,6 +90,9 @@ export type UserPublic = {
 
 // Optimise le $match { role: 'user', isActive: { $ne: false } } du pipeline public/shops
 userSchema.index({ role: 1, isActive: 1 });
+// Recherches de forgot-password / verify-otp et du refresh token
+userSchema.index({ recoveryEmail: 1 }, { sparse: true });
+userSchema.index({ 'refreshTokens.tokenHash': 1 });
 
 const User: Model<IUser> =
   mongoose.models.User ?? mongoose.model<IUser>('User', userSchema);

@@ -1,24 +1,18 @@
 import { connectDB } from '@/lib/db';
 import * as res from '@/lib/api-response';
 import { recoveryEmailSchema } from '@/validators/user.validator';
-import { setRecoveryEmail, sendRecoveryEmailOtp } from '@/services/user.service';
-import { verifyToken, JWTPayload } from '@/lib/auth';
+import { requestRecoveryEmail } from '@/services/user.service';
+import { requireAuthUser } from '@/lib/auth';
+import { checkRateLimit } from '@/lib/tracking-guard';
 
 export async function POST(req: Request) {
   try {
     await connectDB();
+    const authUser = await requireAuthUser(req);
 
-    // ── Vérifier JWT ─────────────────────────────────────────────────────────
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.unauthorized('Token manquant');
-    }
-
-    const token = authHeader.substring(7);
-    const payload: JWTPayload = verifyToken(token);
-
-    if (!payload.userId) {
-      return res.unauthorized('Token invalide');
+    // Chaque appel envoie un email : limite pour protéger le quota d'envoi.
+    if (await checkRateLimit(`recovery-email:user:${authUser.userId}`, 5, 60 * 60_000)) {
+      return res.tooManyRequests();
     }
 
     // ── Valider body ───────────────────────────────────────────────────────────
@@ -29,23 +23,19 @@ export async function POST(req: Request) {
       return res.badRequest('Données invalides', parsed.error.flatten().fieldErrors);
     }
 
-    // ── Sauvegarder email temporaire et envoyer OTP ───────────────────────────
-    await setRecoveryEmail(payload.userId, parsed.data.email);
-
-    // Envoyer OTP en arrière-plan — ne bloque pas la réponse (évite 504 sur Render)
-    sendRecoveryEmailOtp(payload.userId, parsed.data.email).catch(err =>
-      console.error('[recovery-email] OTP send failed:', err)
-    );
+    // ── Mettre l'email en attente et envoyer l'OTP ────────────────────────────
+    await requestRecoveryEmail(authUser.userId, parsed.data.email, parsed.data.currentPassword);
 
     return res.ok({
-      message: 'Email de récupération ajouté. Vérifiez votre boîte mail pour le code OTP.',
-      email: parsed.data.email
+      message: 'Un code de vérification a été envoyé à cette adresse.',
+      email: parsed.data.email,
     });
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
+    if (e.message === 'Non authentifié') return res.unauthorized();
     if (e.status === 400) return res.badRequest(e.message || 'Erreur de validation');
-    if (e.status === 401) return res.unauthorized(e.message || 'Non autorisé');
     if (e.status === 404) return res.notFound(e.message || 'Ressource introuvable');
+    if (e.status === 502) return res.serverError(e.message);
     console.error('[POST /api/user/recovery-email]', err);
     return res.serverError();
   }

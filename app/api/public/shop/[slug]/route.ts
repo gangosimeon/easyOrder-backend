@@ -21,11 +21,12 @@ export async function GET(
     await connectDB();
 
     const { searchParams } = new URL(req.url);
-    const productPage  = Math.max(1, Number(searchParams.get('productPage')  ?? '1'));
-    const productLimit = Math.min(Math.max(1, Number(searchParams.get('productLimit') ?? '20')), 100);
+    const productPage  = Math.max(1, Number(searchParams.get('productPage')) || 1);
+    const productLimit = Math.min(Math.max(1, Number(searchParams.get('productLimit')) || 20), 100);
     const productSkip  = (productPage - 1) * productLimit;
 
-    const shop = await User.findOne({ slug: params.slug }).select('-password').lean();
+    // Une boutique bannie disparaît aussi de la vitrine publique (pas seulement de l'espace commerçant).
+    const shop = await User.findOne({ slug: params.slug, banned: { $ne: true } }).select('-password').lean();
     if (!shop) return res.notFound('Boutique introuvable');
 
     const shopId = shop._id.toString();

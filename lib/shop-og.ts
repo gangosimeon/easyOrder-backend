@@ -52,7 +52,7 @@ export async function getShopOGData(slug: string): Promise<ShopOGData | null> {
   try {
     await connectDB();
 
-    const shop = await User.findOne({ slug })
+    const shop = await User.findOne({ slug, banned: { $ne: true } })
       .select('name slug description address logo coverColor phone')
       .lean() as ShopLean | null;
 

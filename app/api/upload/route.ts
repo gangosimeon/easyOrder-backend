@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     const authUser = await requireAuthUser(request);
 
     // Quota anti-abus (coût/stockage Cloudinary) : 20 uploads / heure / utilisateur.
-    if (checkRateLimit(`upload:${authUser.userId}`, 20, 60 * 60_000)) {
+    if (await checkRateLimit(`upload:${authUser.userId}`, 20, 60 * 60_000)) {
       return NextResponse.json({ error: 'Trop d\'uploads, réessayez plus tard' }, { status: 429 });
     }
 

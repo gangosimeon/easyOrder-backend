@@ -1,62 +1,57 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { sendOtpEmail, isMailerConfigured } from '@/lib/mailer';
+import { generateOtp, hashOtp, OTP_TTL_MS } from '@/lib/otp';
+import { checkRateLimit, getClientIp } from '@/lib/tracking-guard';
+import { forgotPasswordSchema } from '@/validators/user.validator';
 import User from '@/models/user.model';
-import crypto from 'crypto';
 
-function generateOtp(): string {
-  return crypto.randomInt(100000, 999999).toString();
-}
+// Même réponse que l'email existe ou non : ne rien révéler sur les comptes.
+const GENERIC_RESPONSE = {
+  success: true,
+  message: 'Si cet email est associé à un compte, un code de réinitialisation vient d\'y être envoyé.',
+  expiresIn: OTP_TTL_MS / 1000,
+};
 
 export async function POST(req: Request) {
   try {
     await connectDB();
 
-    const body = await req.json();
-    const email = body?.email?.trim().toLowerCase();
-
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    const parsed = forgotPasswordSchema.safeParse(await req.json());
+    if (!parsed.success) {
       return NextResponse.json({ success: false, message: 'Email invalide' }, { status: 400 });
     }
+    const { email } = parsed.data;
 
-    // Chercher l'utilisateur par son email de récupération
-    const user = await User.findOne({ recoveryEmail: email });
-
-    // Réponse générique pour ne pas exposer si l'email existe
-    if (!user) {
-      return NextResponse.json({
-        success: true,
-        message: 'Si cet email est enregistré, vous recevrez un code de réinitialisation.',
-        expiresIn: 300,
-      });
+    // Chaque appel envoie un email : sans limite, on bombarde la victime et on
+    // épuise le quota d'envoi pour tout le monde.
+    if (await checkRateLimit(`forgot-password:ip:${getClientIp(req)}`, 10, 60 * 60_000) ||
+        await checkRateLimit(`forgot-password:email:${email}`, 3, 60 * 60_000)) {
+      return NextResponse.json({ success: false, message: 'Trop de tentatives, réessayez plus tard' }, { status: 429 });
     }
 
-    // Générer OTP
+    // Seul un email *vérifié* peut servir à récupérer un compte.
+    const user = await User.findOne({ recoveryEmail: email, recoveryEmailVerified: true }).select('_id');
+    if (!user) return NextResponse.json(GENERIC_RESPONSE);
+
     const otp = generateOtp();
-    const otpExpireAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { resetOtp: hashOtp(otp), resetOtpExpireAt: new Date(Date.now() + OTP_TTL_MS), resetOtpAttempts: 0 } }
+    );
 
-    // Sauvegarder OTP (champs séparés des OTP de vérification email)
-    user.resetOtp = otp;
-    user.resetOtpExpireAt = otpExpireAt;
-    await user.save();
-
-    // Vérifier la configuration du mailer
     if (!isMailerConfigured()) {
-      console.error('[EMAIL ERROR] GMAIL_USER ou GMAIL_APP_PASSWORD manquant dans .env.local');
+      console.error('[EMAIL ERROR] RESEND_API_KEY manquant');
     }
 
-    // Envoyer l'email en arrière-plan — ne bloque pas la réponse (évite 504 sur Render)
-    sendOtpEmail(email, otp, 'forgot-password').then(result => {
-      if (!result.success) {
-        console.error('[EMAIL ERROR] forgot-password: échec envoi à', email, '|', result.error);
-      }
-    }).catch(err => console.error('[EMAIL ERROR] forgot-password:', err));
+    // Envoi attendu (pas de fire-and-forget) : sur serverless, une promesse
+    // laissée en suspens après la réponse peut être interrompue.
+    const result = await sendOtpEmail(email, otp, 'forgot-password');
+    if (!result.success) {
+      console.error('[EMAIL ERROR] forgot-password: échec d\'envoi |', result.error);
+    }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Code de réinitialisation envoyé sur votre email de récupération.',
-      expiresIn: 300,
-    });
+    return NextResponse.json(GENERIC_RESPONSE);
   } catch (err) {
     console.error('[POST /api/auth/forgot-password]', err);
     return NextResponse.json({ success: false, message: 'Erreur serveur' }, { status: 500 });

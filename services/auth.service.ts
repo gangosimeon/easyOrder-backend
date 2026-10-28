@@ -41,7 +41,12 @@ function issueRefreshToken(user: { refreshTokens: { tokenHash: string; expiresAt
 
 /** Retire du document utilisateur tout ce qui ne doit jamais atteindre le client. */
 function toSafeUser(user: { toObject(): Record<string, unknown> }): UserPublic {
-  const { password: _pw, refreshTokens: _rt, tokenVersion: _tv, banned: _banned, ...safeUser } = user.toObject();
+  const {
+    password: _pw, refreshTokens: _rt, tokenVersion: _tv, banned: _banned,
+    recoveryOtp: _ro, recoveryOtpExpireAt: _roe, recoveryOtpAttempts: _roa,
+    resetOtp: _rs, resetOtpExpireAt: _rse, resetOtpAttempts: _rsa,
+    ...safeUser
+  } = user.toObject();
   return safeUser as unknown as UserPublic;
 }
 

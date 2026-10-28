@@ -1,55 +1,54 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { signResetToken } from '@/lib/auth';
-import User from '@/models/user.model';
+import { otpMatches, OTP_MAX_ATTEMPTS } from '@/lib/otp';
 import { checkRateLimit, getClientIp } from '@/lib/tracking-guard';
+import { verifyResetOtpSchema } from '@/validators/user.validator';
+import User from '@/models/user.model';
+
+const INVALID = { success: false, message: 'Code invalide ou expiré' };
 
 export async function POST(req: Request) {
   try {
     await connectDB();
 
-    const body = await req.json();
-    const email = body?.email?.trim().toLowerCase();
-    const otp = body?.otp?.trim();
-
-    if (!email || !otp) {
-      return NextResponse.json({ success: false, message: 'Email et code requis' }, { status: 400 });
+    const parsed = verifyResetOtpSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json({ success: false, message: 'Email et code à 6 chiffres requis' }, { status: 400 });
     }
+    const { email, otp } = parsed.data;
 
     // Un OTP à 6 chiffres (900k combinaisons) doit être verrouillé bien avant
     // d'être épuisable par force brute pendant sa fenêtre de validité (5 min).
-    const ip = getClientIp(req);
-    if (checkRateLimit(`verify-otp:ip:${ip}`, 20, 10 * 60_000) ||
-        checkRateLimit(`verify-otp:email:${email}`, 5, 15 * 60_000)) {
+    if (await checkRateLimit(`verify-otp:ip:${getClientIp(req)}`, 20, 10 * 60_000)) {
       return NextResponse.json({ success: false, message: 'Trop de tentatives, réessayez plus tard' }, { status: 429 });
     }
 
-    const user = await User.findOne({ recoveryEmail: email });
+    const user = await User.findOne({ recoveryEmail: email, recoveryEmailVerified: true })
+      .select('+resetOtp +resetOtpExpireAt +resetOtpAttempts tokenVersion');
 
-    // Réponse générique pour la sécurité
-    if (!user || !user.resetOtp || !user.resetOtpExpireAt) {
-      return NextResponse.json({ success: false, message: 'Code invalide ou expiré' }, { status: 400 });
+    if (!user || !user.resetOtp || !user.resetOtpExpireAt || user.resetOtpExpireAt < new Date()) {
+      return NextResponse.json(INVALID, { status: 400 });
     }
 
-    // Vérifier expiration
-    if (user.resetOtpExpireAt < new Date()) {
-      user.resetOtp = undefined;
-      user.resetOtpExpireAt = undefined;
-      await user.save();
-      return NextResponse.json({ success: false, message: 'Code expiré. Demandez un nouveau code.' }, { status: 400 });
+    // Compteur en base : le code est grillé après OTP_MAX_ATTEMPTS échecs,
+    // quelle que soit l'IP ou l'instance qui reçoit les tentatives.
+    if (user.resetOtpAttempts >= OTP_MAX_ATTEMPTS) {
+      return NextResponse.json({ success: false, message: 'Trop de tentatives. Demandez un nouveau code.' }, { status: 400 });
     }
 
-    // Vérifier OTP
-    if (user.resetOtp !== otp) {
-      return NextResponse.json({ success: false, message: 'Code invalide' }, { status: 400 });
+    if (!otpMatches(otp, user.resetOtp)) {
+      await User.updateOne({ _id: user._id }, { $inc: { resetOtpAttempts: 1 } });
+      return NextResponse.json(INVALID, { status: 400 });
     }
 
-    // OTP valide — effacer l'OTP et générer reset token (15 min)
-    user.resetOtp = undefined;
-    user.resetOtpExpireAt = undefined;
-    await user.save();
+    // OTP valide — l'effacer et émettre un reset token (15 min, usage unique)
+    await User.updateOne(
+      { _id: user._id },
+      { $unset: { resetOtp: 1, resetOtpExpireAt: 1, resetOtpAttempts: 1 } }
+    );
 
-    const resetToken = signResetToken(user._id.toString());
+    const resetToken = signResetToken(user._id.toString(), user.tokenVersion);
 
     return NextResponse.json({
       success: true,

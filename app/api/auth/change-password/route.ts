@@ -2,24 +2,15 @@ import { connectDB } from '@/lib/db';
 import * as res from '@/lib/api-response';
 import { changePasswordSchema } from '@/validators/auth.validator';
 import { changeUserPassword } from '@/services/auth.service';
-import { verifyToken, JWTPayload } from '@/lib/auth';
+import { requireAuthUser } from '@/lib/auth';
 
 export async function POST(req: Request) {
   try {
     await connectDB();
 
-    // ── Vérifier JWT ─────────────────────────────────────────────────────────
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.unauthorized('Token manquant');
-    }
-
-    const token = authHeader.substring(7);
-    const payload: JWTPayload = verifyToken(token);
-
-    if (!payload.userId) {
-      return res.unauthorized('Token invalide');
-    }
+    // requireAuthUser (et non un simple verifyToken) : un token révoqué par
+    // déconnexion ou appartenant à un compte banni doit être refusé ici aussi.
+    const authUser = await requireAuthUser(req);
 
     // ── Valider body ───────────────────────────────────────────────────────────
     const body = await req.json();
@@ -30,11 +21,12 @@ export async function POST(req: Request) {
     }
 
     // ── Changer le mot de passe ───────────────────────────────────────────────
-    const result = await changeUserPassword(payload.userId, parsed.data);
+    const result = await changeUserPassword(authUser.userId, parsed.data);
 
     return res.ok(result);
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string };
+    if (e.message === 'Non authentifié') return res.unauthorized();
     if (e.status === 400) return res.badRequest(e.message || 'Erreur de validation');
     if (e.status === 401) return res.unauthorized(e.message || 'Non autorisé');
     if (e.status === 404) return res.notFound(e.message || 'Ressource introuvable');

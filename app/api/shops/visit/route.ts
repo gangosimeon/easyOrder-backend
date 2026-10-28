@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { connectDB } from '@/lib/db';
 import * as res from '@/lib/api-response';
 import ShopVisit from '@/models/shop-visit.model';
-import { isBot, isRateLimited } from '@/lib/tracking-guard';
+import { getClientIp, isBot, isRateLimited } from '@/lib/tracking-guard';
 
 const visitSchema = z.object({
   shopId:    z.string().refine((v) => Types.ObjectId.isValid(v), { message: 'shopId invalide' }),
@@ -13,8 +13,7 @@ const visitSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const ipRaw     = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? 'unknown';
-    const ipAddress = ipRaw.split(',')[0].trim();
+    const ipAddress = getClientIp(req);
     const userAgent = req.headers.get('user-agent') ?? 'unknown';
 
     // ── Guard 1: reject bots ──────────────────────────────────
@@ -23,7 +22,7 @@ export async function POST(req: Request) {
     }
 
     // ── Guard 2: rate limit per IP (15 req / min) ─────────────
-    if (isRateLimited(ipAddress)) {
+    if (await isRateLimited(ipAddress)) {
       return res.ok({ recorded: false });
     }
 

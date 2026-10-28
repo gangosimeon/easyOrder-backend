@@ -4,14 +4,11 @@ const nextConfig = {
   // Compatible avec `next start` — n'impacte pas le déploiement Render/Vercel.
   output: 'standalone',
 
-  // ── Images externes autorisées ────────────────────────────────────────────────
+  // ── Optimiseur d'images Next désactivé ─────────────────────────────────────────
+  // Le backend n'utilise pas next/image (les images passent par Cloudinary). Couper
+  // /_next/image supprime la surface des failles RCE/DoS de l'Image Optimization API.
   images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: 'res.cloudinary.com'  },
-      { protocol: 'https', hostname: '**.cloudinary.com'   },
-      { protocol: 'https', hostname: '**.amazonaws.com'    },
-      { protocol: 'https', hostname: '**.imgur.com'        },
-    ],
+    unoptimized: true,
   },
 
   async headers() {

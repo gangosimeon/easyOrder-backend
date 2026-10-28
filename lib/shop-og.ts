@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { connectDB } from './db';
 import User from '@/models/user.model';
 import Product from '@/models/product.model';
@@ -84,6 +85,51 @@ export async function getShopOGData(slug: string): Promise<ShopOGData | null> {
   } catch {
     return null;
   }
+}
+
+// ── Données d'aperçu d'un produit partagé (`/shop/:slug?p=:id`) ───────────────
+// Pas de cache : un prix ou une photo modifiés doivent apparaître au prochain partage.
+export interface ProductOGData {
+  id:          string;
+  name:        string;
+  price:       number;
+  image:       string;
+  description: string;
+  inStock:     boolean;
+}
+
+export async function getProductOGData(slug: string, productId: string): Promise<ProductOGData | null> {
+  if (!Types.ObjectId.isValid(productId)) return null;
+  try {
+    await connectDB();
+    const shop = await User.findOne({ slug, banned: { $ne: true } }).select('_id').lean();
+    if (!shop) return null;
+    const p = await Product.findOne({ _id: productId, shopId: shop._id.toString() })
+      .select('name price image description inStock')
+      .lean() as (ProductLean & { _id: { toString(): string }; description?: string; inStock?: boolean }) | null;
+    if (!p) return null;
+    return {
+      id:          p._id.toString(),
+      name:        p.name ?? '',
+      price:       p.price ?? 0,
+      image:       p.image ?? '',
+      description: p.description ?? '',
+      inStock:     p.inStock !== false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Image d'aperçu au format paysage 1200×630 attendu par WhatsApp/Facebook.
+ * Pour une image Cloudinary on demande le recadrage au CDN ; sinon l'image est
+ * utilisée telle quelle.
+ */
+export function productOgImage(url: string): string {
+  const marker = '/image/upload/';
+  if (!url.includes('res.cloudinary.com') || !url.includes(marker)) return url;
+  return url.replace(marker, `${marker}c_pad,b_white,w_1200,h_630,f_jpg,q_auto/`);
 }
 
 // ── Invalide le cache pour un slug donné ──────────────────────────────────────

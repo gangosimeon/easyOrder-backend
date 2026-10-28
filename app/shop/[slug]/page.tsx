@@ -21,7 +21,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { getShopOGData, isImageUrl, formatPrice } from '@/lib/shop-og';
+import { getShopOGData, getProductOGData, productOgImage, isImageUrl, formatPrice } from '@/lib/shop-og';
 import { detectBot } from '@/lib/bot-detector';
 
 // ── ISR : les données boutique sont revalidées toutes les heures ──────────────
@@ -42,10 +42,65 @@ function resolveBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://easyorder-backend-wnku.onrender.com').replace(/\/$/, '');
 }
 
+type PageProps = { params: { slug: string }; searchParams: { p?: string | string[] } };
+
+function productIdFrom(searchParams: PageProps['searchParams']): string | undefined {
+  return typeof searchParams?.p === 'string' ? searchParams.p : undefined;
+}
+
+// JSON.stringify n'échappe pas `</script>` : un nom de produit malveillant
+// pourrait sinon fermer la balise et injecter du HTML.
+function safeJsonLd(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+// ── Metadata d'un produit partagé (`/shop/:slug?p=:id`) ─────────────────────
+async function productMetadata(slug: string, productId: string): Promise<Metadata | null> {
+  const [shop, product] = await Promise.all([getShopOGData(slug), getProductOGData(slug, productId)]);
+  if (!shop || !product) return null;
+
+  const url   = `${ANGULAR_URL}/shop/${slug}?p=${product.id}`;
+  // Le prix affiché est celui réellement facturé à la commande (`price`).
+  const title = `${product.name} — ${formatPrice(product.price)}`;
+  const desc  = (product.description?.trim() || `Disponible chez ${shop.name}. Commandez facilement via WhatsApp.`).slice(0, 200);
+  const image = isImageUrl(product.image)
+    ? productOgImage(product.image)
+    : `${resolveBaseUrl()}/api/og/shop/${slug}`;
+
+  return {
+    metadataBase: new URL(resolveBaseUrl()),
+    title,
+    description: desc,
+    openGraph: {
+      type:        'website',
+      url,
+      siteName:    'JeCréeMaBoutique',
+      locale:      'fr_FR',
+      title:       `${title} | ${shop.name}`,
+      description: desc,
+      images:      [{ url: image, width: 1200, height: 630, alt: product.name }],
+    },
+    twitter: { card: 'summary_large_image', title, description: desc, images: [{ url: image, alt: product.name }] },
+    alternates: { canonical: url },
+    robots: { index: true, follow: true },
+    other: {
+      'og:image:secure_url':   image,
+      'product:price:amount':  String(product.price),
+      'product:price:currency': 'XOF',
+    },
+  };
+}
+
 // ── Metadata dynamique (injectées dans <head> par Next.js App Router) ─────────
 export async function generateMetadata(
-  { params }: { params: { slug: string } }
+  { params, searchParams }: PageProps
 ): Promise<Metadata> {
+  const productId = productIdFrom(searchParams);
+  if (productId) {
+    const meta = await productMetadata(params.slug, productId);
+    if (meta) return meta;   // produit introuvable : aperçu de la boutique
+  }
+
   const data = await getShopOGData(params.slug);
 
   if (!data) {
@@ -134,9 +189,11 @@ export async function generateMetadata(
 
 // ── Composant page (HTML fallback affiché si le bot interprète le body) ───────
 export default async function ShopOGPage(
-  { params }: { params: { slug: string } }
+  { params, searchParams }: PageProps
 ) {
   const data = await getShopOGData(params.slug);
+  const productId = productIdFrom(searchParams);
+  const product = productId ? await getProductOGData(params.slug, productId) : null;
 
   // Introuvable → renvoie vers Angular
   if (!data) redirect(ANGULAR_URL);
@@ -144,7 +201,7 @@ export default async function ShopOGPage(
   // Sécurité : si un vrai utilisateur arrive ici (ex: no-JS, proxy), le renvoyer
   const ua     = headers().get('user-agent') ?? '';
   const result = detectBot(ua);
-  if (!result.isBot) redirect(`${ANGULAR_URL}/shop/${params.slug}`);
+  if (!result.isBot) redirect(`${ANGULAR_URL}/shop/${params.slug}${product ? `?p=${product.id}` : ''}`);
 
   const shopUrl    = `${ANGULAR_URL}/shop/${params.slug}`;
   const ogImage    = `${resolveBaseUrl()}/api/og/shop/${params.slug}`;
@@ -204,8 +261,28 @@ export default async function ShopOGPage(
       {/* JSON-LD dans le <head> */}
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }}
       />
+      {product && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: safeJsonLd({
+            '@context': 'https://schema.org',
+            '@type':    'Product',
+            name:        product.name,
+            ...(product.description ? { description: product.description } : {}),
+            ...(isImageUrl(product.image) ? { image: product.image } : {}),
+            url:         `${shopUrl}?p=${product.id}`,
+            offers: {
+              '@type':       'Offer',
+              price:         product.price,
+              priceCurrency: 'XOF',
+              availability:  product.inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+              seller:        { '@type': 'Organization', name: data.name },
+            },
+          }) }}
+        />
+      )}
 
       {/* ── Page HTML minimaliste (fallback pour bots qui affichent du HTML) ── */}
       <main

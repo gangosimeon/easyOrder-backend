@@ -34,6 +34,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            set -e
             cd ~/apps/easyorder
             docker compose pull
             docker compose up -d

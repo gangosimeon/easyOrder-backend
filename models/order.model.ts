@@ -18,6 +18,10 @@ export interface IOrder extends Document {
   status: 'pending' | 'confirmed' | 'delivered' | 'cancelled';
   whatsappSent: boolean;
   note?: string;
+  /** Livraison chez le client ou retrait en boutique (absent sur les anciennes commandes). */
+  deliveryMode?: 'delivery' | 'pickup';
+  /** Quartier et point de repère : les adresses postales sont rares, on se repère « près de… ». */
+  deliveryAddress?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,6 +52,8 @@ const orderSchema = new Schema<IOrder>(
     },
     whatsappSent:  { type: Boolean, default: false },
     note:          { type: String },
+    deliveryMode:  { type: String, enum: ['delivery', 'pickup'] },
+    deliveryAddress: { type: String, trim: true },
   },
   { timestamps: true }
 );

@@ -70,6 +70,8 @@ export async function createOrder(shopId: string, data: CreateOrderInput) {
     items,
     total,
     note: data.note,
+    deliveryMode: data.deliveryMode,
+    deliveryAddress: data.deliveryMode === 'delivery' ? data.deliveryAddress : undefined,
     whatsappSent: data.whatsappSent,
   };
 

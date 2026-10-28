@@ -17,6 +17,8 @@ export interface CreateOrderData {
   }[];
   total: number;
   note?: string;
+  deliveryMode?: 'delivery' | 'pickup';
+  deliveryAddress?: string;
   whatsappSent: boolean;
 }
 

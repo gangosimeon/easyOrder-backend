@@ -71,6 +71,32 @@ describe('POST /api/orders', () => {
     expect(res.status).toBe(404);
   });
 
+  it('enregistre le mode de livraison et le quartier', async () => {
+    const { shop, robe } = await shopWithProducts();
+    const res = await createOrder(jsonRequest(`/api/orders?shopSlug=${shop.slug}`,
+      order(robe, { deliveryMode: 'delivery', deliveryAddress: 'Patte d\'Oie, près de la pharmacie' })));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.data.deliveryMode).toBe('delivery');
+    expect(body.data.deliveryAddress).toBe('Patte d\'Oie, près de la pharmacie');
+  });
+
+  it('exige un quartier pour une livraison, pas pour un retrait', async () => {
+    const { shop, robe } = await shopWithProducts();
+    const sansAdresse = await createOrder(jsonRequest(`/api/orders?shopSlug=${shop.slug}`, order(robe, { deliveryMode: 'delivery' })));
+    expect(sansAdresse.status).toBe(400);
+    const retrait = await createOrder(jsonRequest(`/api/orders?shopSlug=${shop.slug}`,
+      order(robe, { deliveryMode: 'pickup', deliveryAddress: 'ignoré' })));
+    expect(retrait.status).toBe(201);
+    expect((await retrait.json()).data.deliveryAddress).toBeUndefined();
+  });
+
+  it('accepte encore les commandes sans mode de livraison (anciennes versions de l\'app)', async () => {
+    const { shop, robe } = await shopWithProducts();
+    const res = await createOrder(jsonRequest(`/api/orders?shopSlug=${shop.slug}`, order(robe)));
+    expect(res.status).toBe(201);
+  });
+
   it('limite le nombre de commandes par IP', async () => {
     const { shop, robe } = await shopWithProducts();
     const ip = freshIp();

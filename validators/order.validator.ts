@@ -27,9 +27,15 @@ export const createOrderSchema = z.object({
   total:         z.number().min(0),
   note:          z.string().max(500).optional(),
   whatsappSent:  z.boolean().default(false),
+  // Optionnels pour rester compatible avec les anciennes versions de l'app (PWA en cache).
+  deliveryMode:    z.enum(['delivery', 'pickup']).optional(),
+  deliveryAddress: z.string().trim().max(200).optional(),
   // Champ piège invisible pour un humain : un robot qui remplit tout le formulaire le renseigne.
   website:       z.string().max(0, 'Requête refusée').optional(),
-});
+}).refine(
+  o => o.deliveryMode !== 'delivery' || (o.deliveryAddress?.length ?? 0) >= 3,
+  { message: 'Indiquez votre quartier ou un point de repère', path: ['deliveryAddress'] },
+);
 
 export const updateOrderStatusSchema = z.object({
   status: z.enum(['pending', 'confirmed', 'delivered', 'cancelled']),

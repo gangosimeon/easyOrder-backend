@@ -8,16 +8,16 @@ export async function getOrdersByShop(shopId: string) {
   return orderRepository.findByShopId(shopId);
 }
 
-export async function getOrdersByShopPaginated(shopId: string | null, limit: number, skip: number) {
-  return orderRepository.findByShopPaginated(shopId, limit, skip);
+export async function getOrdersByShopPaginated(shopId: string | null, limit: number, skip: number, search?: string) {
+  return orderRepository.findByShopPaginated(shopId, limit, skip, search);
 }
 
-export async function countOrdersByShop(shopId: string) {
-  return orderRepository.countByShop(shopId);
+export async function countOrdersByShop(shopId: string, search?: string) {
+  return orderRepository.countByShop(shopId, search);
 }
 
-export async function countOrders() {
-  return orderRepository.countAll();
+export async function countOrders(search?: string) {
+  return orderRepository.countAll(search);
 }
 
 export async function getOrderById(id: string, shopId: string) {

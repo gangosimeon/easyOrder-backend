@@ -17,6 +17,8 @@ export async function GET(req: Request) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
     const skip = (page - 1) * limit;
+    // Recherche nom / téléphone sur toutes les commandes, pas seulement la page chargée
+    const search = (searchParams.get('search') ?? '').trim().slice(0, 50) || undefined;
 
     // Admin: voit toutes les commandes
     // User: voit uniquement ses commandes (shopId === userId)
@@ -26,8 +28,8 @@ export async function GET(req: Request) {
     if (authUser.role === 'admin') {
       // Admin: pas de filtrage shopId
       const [ordersData, count] = await Promise.all([
-        getOrdersByShopPaginated(null, limit, skip),
-        countOrders(),
+        getOrdersByShopPaginated(null, limit, skip, search),
+        countOrders(search),
       ]);
       orders = ordersData;
       total = count;
@@ -41,8 +43,8 @@ export async function GET(req: Request) {
       // User: filtrage strict par shopId (userId === shopId)
       const shopId = authUser.userId;
       const [ordersData, count] = await Promise.all([
-        getOrdersByShopPaginated(shopId, limit, skip),
-        countOrdersByShop(shopId),
+        getOrdersByShopPaginated(shopId, limit, skip, search),
+        countOrdersByShop(shopId, search),
       ]);
       orders = ordersData;
       total = count;

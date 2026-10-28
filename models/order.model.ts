@@ -60,6 +60,8 @@ const orderSchema = new Schema<IOrder>(
 
 orderSchema.index({ shopId: 1 });
 orderSchema.index({ shopId: 1, status: 1 });
+// Liste paginée du commerçant, triée de la plus récente à la plus ancienne
+orderSchema.index({ shopId: 1, createdAt: -1 });
 
 const Order: Model<IOrder> =
   mongoose.models.Order ?? mongoose.model<IOrder>('Order', orderSchema);

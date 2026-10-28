@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { POST as createCategory } from '@/app/api/categories/route';
 import { POST as createProduct } from '@/app/api/products/route';
-import { POST as createOrder } from '@/app/api/orders/route';
+import { GET as listOrders, POST as createOrder } from '@/app/api/orders/route';
 import User from '@/models/user.model';
 import { createShop, freshIp, jsonRequest } from './helpers';
 
@@ -22,6 +22,32 @@ function order(productId: string, overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe('GET /api/orders (commerçant)', () => {
+  it('recherche par nom ou téléphone sur toutes les commandes, sans voir celles des autres boutiques', async () => {
+    const { shop, robe } = await shopWithProducts();
+    const other = await createShop('Autre', '70000019');
+    const otherCat = await (await createCategory(jsonRequest('/api/categories', { name: 'X' }, { token: other.token }))).json();
+    const otherProd = (await (await createProduct(jsonRequest('/api/products', { categoryId: otherCat.data._id, name: 'Y', price: 1 }, { token: other.token }))).json()).data._id;
+
+    await createOrder(jsonRequest(`/api/orders?shopSlug=${shop.slug}`, order(robe, { customerName: 'Aminata Traoré', customerPhone: '22670111222' })));
+    await createOrder(jsonRequest(`/api/orders?shopSlug=${shop.slug}`, order(robe, { customerName: 'Moussa', customerPhone: '22676999888' })));
+    await createOrder(jsonRequest(`/api/orders?shopSlug=${other.slug}`, order(otherProd, { customerName: 'Aminata Autre', customerPhone: '22670111333' })));
+
+    const list = async (search: string) =>
+      (await (await listOrders(jsonRequest(`/api/orders?search=${encodeURIComponent(search)}`, undefined, { token: shop.token }))).json()).data;
+
+    const byName = await list('amina');
+    expect(byName.data.map((o: { customerName: string }) => o.customerName)).toEqual(['Aminata Traoré']);
+    expect(byName.pagination.total).toBe(1);
+
+    const byPhone = await list('70 111');
+    expect(byPhone.data).toHaveLength(1);
+
+    const regexChars = await list('.*');
+    expect(regexChars.data).toHaveLength(0);
+  });
+});
 
 describe('POST /api/orders', () => {
   it('recalcule le total à partir des prix en base', async () => {

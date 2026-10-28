@@ -1,6 +1,6 @@
 // Échappe les métacaractères regex pour éviter le ReDoS via un $regex construit
 // à partir d'une entrée utilisateur (search, admin).
-function escapeRegExp(value: string): string {
+export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 

@@ -1,5 +1,22 @@
 import mongoose from 'mongoose';
 import Order, { IOrder } from '../models/order.model';
+import { escapeRegExp } from '@/lib/query-builder';
+
+/**
+ * Filtre Mongo des commandes : boutique (sauf vue admin) et recherche libre
+ * sur le nom du client ou son numéro (chiffres seuls, l'indicatif est stocké).
+ */
+function orderFilter(shopId: string | null, search?: string): Record<string, unknown> {
+  const filter: Record<string, unknown> = shopId ? { shopId: new mongoose.Types.ObjectId(shopId) } : {};
+  const term = search?.trim();
+  if (term) {
+    const or: Record<string, unknown>[] = [{ customerName: { $regex: escapeRegExp(term), $options: 'i' } }];
+    const digits = term.replace(/\D/g, '');
+    if (digits.length >= 3) or.push({ customerPhone: { $regex: escapeRegExp(digits) } });
+    filter.$or = or;
+  }
+  return filter;
+}
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -89,11 +106,10 @@ export class OrderRepository {
   /**
    * Récupère toutes les commandes d'une boutique avec pagination.
    */
-  async findByShopPaginated(shopId: string | null, limit: number, skip: number): Promise<OrderDocument[]> {
+  async findByShopPaginated(shopId: string | null, limit: number, skip: number, search?: string): Promise<OrderDocument[]> {
     try {
-      const filter = shopId ? { shopId: new mongoose.Types.ObjectId(shopId) } : {};
       return await this.model
-        .find(filter)
+        .find(orderFilter(shopId, search))
         .sort({ createdAt: -1 })
         .limit(limit)
         .skip(skip)
@@ -107,10 +123,10 @@ export class OrderRepository {
   /**
    * Compte les commandes d'une boutique.
    */
-  async countByShop(shopId: string): Promise<number> {
+  async countByShop(shopId: string, search?: string): Promise<number> {
     try {
       if (!mongoose.Types.ObjectId.isValid(shopId)) return 0;
-      return await this.model.countDocuments({ shopId: new mongoose.Types.ObjectId(shopId) });
+      return await this.model.countDocuments(orderFilter(shopId, search));
     } catch (error) {
       console.error('[OrderRepository.countByShop] MongoDB error:', error);
       throw new Error('Erreur lors du comptage des commandes');
@@ -120,9 +136,9 @@ export class OrderRepository {
   /**
    * Compte toutes les commandes (admin).
    */
-  async countAll(): Promise<number> {
+  async countAll(search?: string): Promise<number> {
     try {
-      return await this.model.countDocuments({});
+      return await this.model.countDocuments(orderFilter(null, search));
     } catch (error) {
       console.error('[OrderRepository.countAll] MongoDB error:', error);
       throw new Error('Erreur lors du comptage des commandes');

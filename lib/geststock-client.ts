@@ -379,6 +379,11 @@ export class GeststockClient {
 
 // --- Configuration ---------------------------------------------------------------------------------------
 
+/** `redirect_uri` de la configuration (validée), enregistrée avec chaque demande (J2, J4). */
+export function geststockRedirectUri(): string {
+  return clientConfig().redirectUri;
+}
+
 /** Configuration du client, validée à chaque appel (première utilisation, comme J1) ; refus nommant la variable. */
 function clientConfig(): ClientConfig {
   if (!isIntegrationEnabled()) {

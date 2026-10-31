@@ -36,21 +36,38 @@ export function getClientIp(req: Request): string {
 }
 
 /**
+ * Compte une requête sous `key` dans la fenêtre courante de `windowMs` et
+ * indique si `maxHits` est dépassé, avec le délai jusqu'à la fin de la fenêtre.
+ * Base indisponible : lève l'erreur (à l'appelant de refuser ou de laisser passer).
+ */
+export async function hitRateLimit(
+  key: string,
+  maxHits: number,
+  windowMs: number
+): Promise<{ limited: boolean; retryAfterSeconds: number }> {
+  const now = Date.now();
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  await connectDB();
+  const doc = await RateLimit.findOneAndUpdate(
+    { _id: `${key}:${windowStart}` },
+    { $inc: { count: 1 }, $setOnInsert: { expiresAt: new Date(windowStart + windowMs) } },
+    { upsert: true, new: true, lean: true }
+  );
+  return {
+    limited: (doc?.count ?? 0) > maxHits,
+    retryAfterSeconds: Math.max(1, Math.ceil((windowStart + windowMs - now) / 1000)),
+  };
+}
+
+/**
  * Renvoie `true` si la clé a dépassé `maxHits` requêtes dans la fenêtre
  * courante de `windowMs`. Chaque appel compte comme une requête.
  * En cas d'indisponibilité de la base, on laisse passer : la route échouera
  * de toute façon plus loin sur la même base.
  */
 export async function checkRateLimit(key: string, maxHits: number, windowMs: number): Promise<boolean> {
-  const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
   try {
-    await connectDB();
-    const doc = await RateLimit.findOneAndUpdate(
-      { _id: `${key}:${windowStart}` },
-      { $inc: { count: 1 }, $setOnInsert: { expiresAt: new Date(windowStart + windowMs) } },
-      { upsert: true, new: true, lean: true }
-    );
-    return (doc?.count ?? 0) > maxHits;
+    return (await hitRateLimit(key, maxHits, windowMs)).limited;
   } catch (err) {
     console.error('[rate-limit] indisponible :', err);
     return false;

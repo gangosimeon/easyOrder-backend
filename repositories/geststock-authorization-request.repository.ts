@@ -23,6 +23,8 @@ export interface NewAuthorizationRequest {
   requestUri: string;
   redirectUri: string;
   now?: Date;
+  /** Durée de vie demandée (`expires_in` du `request_uri`) : la plus courte entre elle et 10 minutes. */
+  lifetimeMs?: number;
 }
 
 export interface ConsumedAuthorizationRequest {
@@ -40,7 +42,7 @@ type StoredRequest = IGeststockAuthorizationRequest;
 export class GeststockAuthorizationRequestRepository {
   private model = GeststockAuthorizationRequest;
 
-  /** Enregistre la demande, valable 10 minutes. */
+  /** Enregistre la demande, valable 10 minutes au plus (moins si `lifetimeMs` est plus court). */
   async create(input: NewAuthorizationRequest): Promise<{ id: string; expiresAt: Date }> {
     if (!mongoose.isValidObjectId(input.shopId) || !STATE.test(input.state) || !CODE_VERIFIER.test(input.codeVerifier)) {
       throw new Error('Demande d’autorisation GestStock invalide.');
@@ -48,7 +50,8 @@ export class GeststockAuthorizationRequestRepository {
     const id = new mongoose.Types.ObjectId();
     const shopId = new mongoose.Types.ObjectId(input.shopId);
     const now = input.now ?? new Date();
-    const expiresAt = new Date(now.getTime() + AUTHORIZATION_REQUEST_LIFETIME_MS);
+    const lifetime = Math.min(AUTHORIZATION_REQUEST_LIFETIME_MS, Math.max(0, input.lifetimeMs ?? AUTHORIZATION_REQUEST_LIFETIME_MS));
+    const expiresAt = new Date(now.getTime() + lifetime);
     await this.model.create({
       _id: id,
       shopId,
@@ -60,6 +63,12 @@ export class GeststockAuthorizationRequestRepository {
       usedAt: null,
     });
     return { id: id.toString(), expiresAt };
+  }
+
+  /** Demandes encore utilisables de la boutique (non consommées, non expirées). */
+  async countPending(shopId: string, now = new Date()): Promise<number> {
+    if (!mongoose.isValidObjectId(shopId)) return 0;
+    return this.model.countDocuments({ shopId: new mongoose.Types.ObjectId(shopId), usedAt: null, expiresAt: { $gt: now } });
   }
 
   /**

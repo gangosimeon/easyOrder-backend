@@ -419,6 +419,9 @@ describe('Client HTTP GestStock', () => {
     const again = credentials();
     fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(problem(401, 'LINK_REVOKED'));
     expect(await client.revokeLink(again)).toEqual({ link: null, alreadyRevoked: true });
+    // Sans motif : corps {} (LinkRevocationRequest.reason absent, donc null chez GestStock).
+    expect(fetchMock.mock.calls[3][1]?.body).toBe('{}');
+    expect(header(fetchMock.mock.calls[3][1], 'content-type')).toBe('application/json');
   });
 
   // --- Transport ------------------------------------------------------------------------------------------

@@ -24,6 +24,12 @@ export const MAX_PENDING_REQUESTS = 3;
 /** Consultation : l'état est relu chez GestStock s'il date de plus d'une minute. */
 export const LINK_REFRESH_AFTER_MS = 60_000;
 
+/**
+ * `Retry-After` d'un 429 de GestStock qui n'en donne pas (J5) : une minute, la fenêtre des limites de débit des routes
+ * du client chez GestStock. Un 429 rendu à l'écran porte toujours ce délai.
+ */
+export const GESTSTOCK_RETRY_AFTER_FALLBACK_SECONDS = 60;
+
 /** Portées du contrat demandées à la liaison (C5) ; `GESTSTOCK_SCOPES` peut les restreindre. */
 const CONTRACT_SCOPES = ['catalog:read', 'catalog:match', 'price:propose', 'stock:read', 'orders:read', 'orders:write'];
 
@@ -195,6 +201,7 @@ export async function currentGeststockLink(shopId: string): Promise<{ link: Shop
       currency: remote.currency,
       scopes: remote.scopes,
       warehouses: remote.warehouses,
+      companyName: remote.companyName,
       revokedAt: remote.revokedAt,
       syncedAt: new Date(),
     });
@@ -299,7 +306,12 @@ function fromGeststock(error: unknown, context: string): GeststockRouteError {
       case 'LINK_REVOKED':
         return new GeststockRouteError(409, 'LINK_REVOKED', 'La liaison a été révoquée par GestStock : recommencez la liaison.');
       case 'RATE_LIMITED':
-        return new GeststockRouteError(429, 'GESTSTOCK_RATE_LIMITED', 'GestStock reçoit trop de demandes : réessayez plus tard.', error.details.retryAfterSeconds);
+        return new GeststockRouteError(
+          429,
+          'GESTSTOCK_RATE_LIMITED',
+          'GestStock reçoit trop de demandes : réessayez plus tard.',
+          error.details.retryAfterSeconds ?? GESTSTOCK_RETRY_AFTER_FALLBACK_SECONDS
+        );
       case 'UNAVAILABLE':
       case 'TIMEOUT':
       case 'NETWORK':

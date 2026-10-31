@@ -44,6 +44,15 @@ const TOKEN_MARGIN_MS = 60_000;
 /** Longueur maximale conservée d'un motif (limite du modèle J2). */
 const REASON_MAX_LENGTH = 64;
 
+/**
+ * Longueur maximale du nom de l'entreprise, en caractères : celle de sa source chez GestStock
+ * (`platform.company.trade_name`, `varchar(150)`, G15).
+ */
+export const COMPANY_NAME_MAX_LENGTH = 150;
+
+/** Caractères de contrôle Unicode (catégorie Cc : U+0000 à U+001F, U+007F à U+009F). */
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/g;
+
 const API_PATH = '/api/integration/v1';
 const AUTHORIZE_PATH = '/integrations/jecreemaboutique/authorize';
 const REQUEST_URI_PREFIX = 'urn:ietf:params:oauth:request_uri:';
@@ -110,7 +119,7 @@ export interface RemoteLink {
   suspensionReason: string | null;
   revocationReason: string | null;
   companyCode: string;
-  /** Absent de `GET /link` et de l'échange chez GestStock : toujours `null` pour l'instant. */
+  /** Nom affichable de l'entreprise (G15), nettoyé et borné ; `null` s'il est absent ou inutilisable. */
   companyName: string | null;
   currency: string;
   externalShopId: string;
@@ -560,7 +569,7 @@ function remoteLink(raw: unknown, context: string): RemoteLink {
     suspensionReason: reason(view.suspensionReason),
     revocationReason: reason(view.revocationReason),
     companyCode: view.companyCode,
-    companyName: text(view.companyName) ? view.companyName : null,
+    companyName: companyName(view.companyName),
     currency: view.currency,
     externalShopId: view.externalShopId,
     scopes: [...view.scopes],
@@ -569,6 +578,18 @@ function remoteLink(raw: unknown, context: string): RemoteLink {
     lastSyncAt: date(view.lastSyncAt),
     revokedAt: date(view.revokedAt),
   };
+}
+
+/**
+ * Nom de l'entreprise, seulement affichable : jamais une cause d'échec. Texte seulement (tout autre type → `null`),
+ * caractères de contrôle retirés, blancs de bord retirés, borné à {@link COMPANY_NAME_MAX_LENGTH} caractères (coupé
+ * par caractère, jamais au milieu d'une paire de substitution) ; vide ensuite → `null`.
+ */
+function companyName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const cleaned = value.replace(CONTROL_CHARACTERS, '').trim();
+  if (!cleaned) return null;
+  return Array.from(cleaned).slice(0, COMPANY_NAME_MAX_LENGTH).join('').trimEnd();
 }
 
 /** Motif libre, tel que reçu (valeur inconnue tolérée), borné à la limite du modèle J2 sans jamais échouer. */

@@ -424,6 +424,70 @@ describe('Client HTTP GestStock', () => {
     expect(header(fetchMock.mock.calls[3][1], 'content-type')).toBe('application/json');
   });
 
+  // --- companyName (J5, G15) ----------------------------------------------------------------------------
+
+  it('companyName : lu dans l’échange du code, GET /link et la révocation', async () => {
+    const name = remember('Optique Principale de Ouaga');
+    const linkSecret = remember(randomBytes(32).toString('base64url'));
+    const view = linkView({ companyName: name });
+    fetchMock.mockResolvedValueOnce(json(200, { ...(await tokenResponse().json()), link: view, link_secret: linkSecret }));
+    const exchanged = await client.exchangeCode({
+      code: remember(randomBytes(32).toString('base64url')),
+      codeVerifier: remember(randomBytes(32).toString('base64url')),
+      iss: 'geststock-integration',
+    });
+    expect(exchanged.link.companyName).toBe(name);
+
+    const link = credentials();
+    fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(json(200, linkView({ id: link.linkId, companyName: name })));
+    expect((await client.getLink(link)).companyName).toBe(name);
+
+    fetchMock.mockResolvedValueOnce(
+      json(200, linkView({ id: link.linkId, companyName: name, status: 'REVOKED', revocationReason: 'SHOP_REQUEST', revokedAt: '2026-10-30T11:00:00Z', warehouses: [] }))
+    );
+    expect((await client.revokeLink(link)).link?.companyName).toBe(name);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['vide', ''],
+    ['blanc', ' \t '],
+    ['nombre', 42],
+    ['booléen', true],
+    ['objet', { name: 'Optique' }],
+    ['tableau', ['Optique']],
+    ['caractères de contrôle seuls', '\u0000\u001F\u007F'],
+  ])('companyName %s → null, sans faire échouer la réponse', async (_label, value) => {
+    const link = credentials();
+    const view = linkView({ id: link.linkId });
+    if (value === undefined) delete view.companyName;
+    else view.companyName = value;
+    fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(json(200, view));
+    const remote = await client.getLink(link);
+    expect(remote.companyName).toBeNull();
+    expect(remote.companyCode).toBe('optique-principale');
+  });
+
+  it('companyName trop long : tronqué à 150 caractères (colonne trade_name de GestStock), jamais refusé', async () => {
+    const link = credentials();
+    const long = 'É'.repeat(149) + '😀' + 'x'.repeat(20);
+    fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(json(200, linkView({ id: link.linkId, companyName: long })));
+    const name = (await client.getLink(link)).companyName as string;
+    expect(Array.from(name)).toHaveLength(150);
+    // Coupé par caractère, jamais au milieu d'une paire de substitution.
+    expect(name.endsWith('😀')).toBe(true);
+    expect(name).toBe(long.slice(0, 151));
+  });
+
+  it('companyName : caractères de contrôle retirés, blancs de bord retirés', async () => {
+    const link = credentials();
+    fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(
+      json(200, linkView({ id: link.linkId, companyName: '  \u0000Optique\u0007 Prin\u001Fcipale\u007F\u0085\u009F\r\n ' }))
+    );
+    expect((await client.getLink(link)).companyName).toBe('Optique Principale');
+  });
+
   // --- Transport ------------------------------------------------------------------------------------------
 
   it('redirection : refusée, jamais suivie', async () => {

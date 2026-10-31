@@ -41,6 +41,11 @@ export interface RemoteLinkState {
   currency?: string;
   scopes?: string[];
   warehouses?: LinkWarehouse[];
+  /**
+   * Nom affichable de l'entreprise (J5, déjà nettoyé par le client). Un nom reçu remplace l'ancien ; `null` ou absent
+   * ne l'efface pas : GestStock ne renvoie `null` que pour un nom vide ou illisible, jamais pour retirer un nom.
+   */
+  companyName?: string | null;
   revokedAt?: Date | null;
   syncedAt: Date;
 }
@@ -165,6 +170,7 @@ export class GeststockLinkRepository {
     if (state.currency !== undefined) set.currency = state.currency;
     if (state.scopes !== undefined) set.scopes = state.scopes;
     if (state.warehouses !== undefined) set.warehouses = state.warehouses;
+    if (state.companyName) set.companyName = state.companyName;
     const updated = await this.model
       .findOneAndUpdate({ shopId: objectId(shopId), linkId, status: NOT_REVOKED }, { $set: set }, { new: true, runValidators: true })
       .lean<StoredLink>();

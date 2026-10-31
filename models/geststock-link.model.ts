@@ -83,7 +83,13 @@ const geststockLinkSchema = new Schema<IGeststockLink>(
     linkId:       { type: String, required: true, match: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i },
     status:       { type: String, enum: GESTSTOCK_LINK_STATUSES, required: true },
     companyCode:  { type: String, required: true },
-    companyName:  { type: String, default: null },
+    // Borné comme sa source chez GestStock (platform.company.trade_name, varchar(150)), en caractères et non en
+    // unités UTF-16 comme maxlength ; le client J3 tronque avant.
+    companyName:  {
+      type: String,
+      default: null,
+      validate: { validator: (value: string | null) => value === null || Array.from(value).length <= 150 },
+    },
     currency:     { type: String, required: true, match: /^[A-Z]{3}$/ },
     scopes:       { type: [String], default: [] },
     warehouses:   { type: [warehouseSchema], default: [] },

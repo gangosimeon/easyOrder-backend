@@ -394,6 +394,88 @@ describe('Routes de la liaison GestStock', () => {
     expect(await GeststockLink.countDocuments({ shopId: s.id })).toBe(0);
   });
 
+  it('GestStock 429 sans Retry-After : 429 GESTSTOCK_RATE_LIMITED avec un Retry-After par défaut (60 s)', async () => {
+    const s = await shop();
+    const { state } = await started(s);
+    vi.spyOn(geststockClient, 'exchangeCode').mockRejectedValueOnce(new GeststockError('RATE_LIMITED', { status: 429 }));
+    const response = await completeLink(s.token, { code: token(), state, iss: 'geststock-integration' });
+    expect(response.status).toBe(429);
+    expect(response.json.code).toBe('GESTSTOCK_RATE_LIMITED');
+    expect(response.headers.get('retry-after')).toBe('60');
+
+    // Même règle pour la révocation (seule autre route qui transmet un 429 de GestStock).
+    await linked(s);
+    vi.spyOn(geststockClient, 'revokeLink').mockRejectedValueOnce(new GeststockError('RATE_LIMITED', { status: 429 }));
+    const revoked = await revokeLink(s.token);
+    expect(revoked.status).toBe(429);
+    expect(revoked.json.code).toBe('GESTSTOCK_RATE_LIMITED');
+    expect(revoked.headers.get('retry-after')).toBe('60');
+  });
+
+  // --- companyName (J5, G15) -----------------------------------------------------------------------------
+
+  it('companyName : enregistré à la création, transmis à l’écran, mis à jour au rafraîchissement, jamais journalisé', async () => {
+    const s = await shop();
+    const { state } = await started(s);
+    const name = 'Optique Principale de Ouaga';
+    const link = remote(s.id, { companyName: name });
+    vi.spyOn(geststockClient, 'exchangeCode').mockResolvedValueOnce({ linkId: link.linkId, linkSecret: remember(token()), link });
+    const done = await completeLink(s.token, { code: remember(token()), state, iss: 'geststock-integration' });
+    expect(done.status).toBe(201);
+    expect(done.json.data.link.companyName).toBe(name);
+    expect((await GeststockLink.findOne({ linkId: link.linkId }).lean())?.companyName).toBe(name);
+
+    // Rafraîchissement : nouveau nom reçu, enregistré et rendu.
+    const renamed = 'Optique Principale SARL';
+    await GeststockLink.updateOne({ linkId: link.linkId }, { lastStateSyncAt: null });
+    vi.spyOn(geststockClient, 'getLink').mockResolvedValueOnce(remote(s.id, { linkId: link.linkId, companyName: renamed }));
+    const refreshed = await readLink(s.token);
+    expect(refreshed.json.data).toMatchObject({ refreshed: true, stale: false, link: { companyName: renamed } });
+    expect((await GeststockLink.findOne({ linkId: link.linkId }).lean())?.companyName).toBe(renamed);
+
+    const logs = output.join('\n');
+    expect(logs).not.toContain(name);
+    expect(logs).not.toContain(renamed);
+  });
+
+  it('companyName de 150 caractères avec emoji (plus de 150 unités UTF-16) : enregistré sans échec', async () => {
+    const s = await shop();
+    const { state } = await started(s);
+    const name = '😀'.repeat(150);
+    const link = remote(s.id, { companyName: name });
+    vi.spyOn(geststockClient, 'exchangeCode').mockResolvedValueOnce({ linkId: link.linkId, linkSecret: remember(token()), link });
+    const revoke = vi.spyOn(geststockClient, 'revokeLink');
+    const done = await completeLink(s.token, { code: remember(token()), state, iss: 'geststock-integration' });
+    expect(done.status).toBe(201);
+    expect(revoke).not.toHaveBeenCalled();
+    expect((await GeststockLink.findOne({ linkId: link.linkId }).lean())?.companyName).toBe(name);
+  });
+
+  it('companyName : un null reçu au rafraîchissement n’efface pas le nom déjà connu', async () => {
+    const s = await shop();
+    const { state } = await started(s);
+    const link = remote(s.id, { companyName: 'Optique Principale' });
+    vi.spyOn(geststockClient, 'exchangeCode').mockResolvedValueOnce({ linkId: link.linkId, linkSecret: remember(token()), link });
+    expect((await completeLink(s.token, { code: remember(token()), state, iss: 'geststock-integration' })).status).toBe(201);
+
+    await GeststockLink.updateOne({ linkId: link.linkId }, { lastStateSyncAt: null });
+    vi.spyOn(geststockClient, 'getLink').mockResolvedValueOnce(remote(s.id, { linkId: link.linkId, companyName: null, status: 'SUSPENDED', suspensionReason: 'MANUAL' }));
+    const refreshed = await readLink(s.token);
+    // Le reste de l'état est bien appliqué ; seul le nom est conservé.
+    expect(refreshed.json.data).toMatchObject({ refreshed: true, link: { status: 'SUSPENDED', companyName: 'Optique Principale' } });
+    expect((await GeststockLink.findOne({ linkId: link.linkId }).lean())?.companyName).toBe('Optique Principale');
+  });
+
+  it('companyName : liaison créée sans nom, nom reçu au rafraîchissement → enregistré', async () => {
+    const s = await shop();
+    const { linkId } = await linked(s);
+    expect((await GeststockLink.findOne({ linkId }).lean())?.companyName).toBeNull();
+    await GeststockLink.updateOne({ linkId }, { lastStateSyncAt: null });
+    vi.spyOn(geststockClient, 'getLink').mockResolvedValueOnce(remote(s.id, { linkId, companyName: 'Optique Principale' }));
+    expect((await readLink(s.token)).json.data.link.companyName).toBe('Optique Principale');
+    expect((await GeststockLink.findOne({ linkId }).lean())?.companyName).toBe('Optique Principale');
+  });
+
   // --- Compensation ------------------------------------------------------------------------------------
 
   async function completeWithSaveFailure(s: TestShop, failure: () => Promise<void>, revokeOutcome: 'ok' | 'fail') {

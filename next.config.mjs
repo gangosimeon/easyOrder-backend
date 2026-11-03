@@ -13,7 +13,7 @@ const nextConfig = {
 
   async headers() {
     // const frontendUrl = process.env.FRONTEND_URL || 'https://www.jecreemaboutique.com';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200'||'http://localhost:4300';
 
     return [
       // ── CORS pour les routes API ────────────────────────────────────────────

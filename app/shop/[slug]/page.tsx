@@ -32,9 +32,9 @@ const ANGULAR_URL = (process.env.FRONTEND_URL ?? 'https://www.jecreemaboutique.c
 // ── Résout l'URL de base depuis les headers de la requête entrante ─────────────
 // Évite de hard-coder l'URL Render (qui a des cold starts) dans les balises og:image.
 // Quand le bot fait la requête, on utilise le même host pour l'image OG.
-function resolveBaseUrl(): string {
+async function resolveBaseUrl(): Promise<string> {
   try {
-    const h     = headers();
+    const h     = await headers();
     const host  = h.get('host') ?? '';
     const proto = h.get('x-forwarded-proto') ?? 'https';
     if (host) return `${proto}://${host}`;
@@ -42,9 +42,9 @@ function resolveBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_BASE_URL ?? 'https://easyorder-backend-wnku.onrender.com').replace(/\/$/, '');
 }
 
-type PageProps = { params: { slug: string }; searchParams: { p?: string | string[] } };
+type PageProps = { params: Promise<{ slug: string }>; searchParams: Promise<{ p?: string | string[] }> };
 
-function productIdFrom(searchParams: PageProps['searchParams']): string | undefined {
+function productIdFrom(searchParams: { p?: string | string[] }): string | undefined {
   return typeof searchParams?.p === 'string' ? searchParams.p : undefined;
 }
 
@@ -63,12 +63,13 @@ async function productMetadata(slug: string, productId: string): Promise<Metadat
   // Le prix affiché est celui réellement facturé à la commande (`price`).
   const title = `${product.name} — ${formatPrice(product.price)}`;
   const desc  = (product.description?.trim() || `Disponible chez ${shop.name}. Commandez facilement via WhatsApp.`).slice(0, 200);
+  const baseUrlForProduct = await resolveBaseUrl();
   const image = isImageUrl(product.image)
     ? productOgImage(product.image)
-    : `${resolveBaseUrl()}/api/og/shop/${slug}`;
+    : `${baseUrlForProduct}/api/og/shop/${slug}`;
 
   return {
-    metadataBase: new URL(resolveBaseUrl()),
+    metadataBase: new URL(baseUrlForProduct),
     title,
     description: desc,
     openGraph: {
@@ -92,9 +93,9 @@ async function productMetadata(slug: string, productId: string): Promise<Metadat
 }
 
 // ── Metadata dynamique (injectées dans <head> par Next.js App Router) ─────────
-export async function generateMetadata(
-  { params, searchParams }: PageProps
-): Promise<Metadata> {
+export async function generateMetadata(props: PageProps): Promise<Metadata> {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const productId = productIdFrom(searchParams);
   if (productId) {
     const meta = await productMetadata(params.slug, productId);
@@ -111,7 +112,7 @@ export async function generateMetadata(
     };
   }
 
-  const baseUrl  = resolveBaseUrl();
+  const baseUrl  = await resolveBaseUrl();
   const ogImage  = `${baseUrl}/api/og/shop/${params.slug}`;
   const shopUrl  = `${ANGULAR_URL}/shop/${params.slug}`;
   const siteDesc = data.description?.trim()
@@ -188,9 +189,9 @@ export async function generateMetadata(
 }
 
 // ── Composant page (HTML fallback affiché si le bot interprète le body) ───────
-export default async function ShopOGPage(
-  { params, searchParams }: PageProps
-) {
+export default async function ShopOGPage(props: PageProps) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const data = await getShopOGData(params.slug);
   const productId = productIdFrom(searchParams);
   const product = productId ? await getProductOGData(params.slug, productId) : null;
@@ -199,12 +200,12 @@ export default async function ShopOGPage(
   if (!data) redirect(ANGULAR_URL);
 
   // Sécurité : si un vrai utilisateur arrive ici (ex: no-JS, proxy), le renvoyer
-  const ua     = headers().get('user-agent') ?? '';
+  const ua     = (await headers()).get('user-agent') ?? '';
   const result = detectBot(ua);
   if (!result.isBot) redirect(`${ANGULAR_URL}/shop/${params.slug}${product ? `?p=${product.id}` : ''}`);
 
   const shopUrl    = `${ANGULAR_URL}/shop/${params.slug}`;
-  const ogImage    = `${resolveBaseUrl()}/api/og/shop/${params.slug}`;
+  const ogImage    = `${await resolveBaseUrl()}/api/og/shop/${params.slug}`;
   const description = data.description?.trim()
     || `Découvrez les produits de ${data.name}. Commandez facilement via WhatsApp.`;
 

@@ -3,10 +3,8 @@ import { requireAdmin } from '@/lib/auth';
 import * as res from '@/lib/api-response';
 import { getAdminShopById } from '@/services/admin-shop.service';
 
-export async function GET(
-  req: Request,
-  { params }: { params: { id: string } },
-) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     await connectDB();
     await requireAdmin(req);

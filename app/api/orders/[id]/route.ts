@@ -5,10 +5,8 @@ import * as res from '@/lib/api-response';
 import { updateOrderStatusSchema } from '@/validators/order.validator';
 import { updateOrderStatus } from '@/services/order.service';
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     await connectDB();
     const authUser = await requireAuthUser(req);

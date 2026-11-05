@@ -37,8 +37,8 @@ import { ogFonts }       from '@/lib/og-fonts';
 import { isSafeExternalImageUrl } from '@/lib/safe-url';
 import type { NextRequest } from 'next/server';
 
-// ── Edge runtime : cold starts rapides, déploiement mondial ───────────────────
-export const runtime = 'edge';
+// ── Node.js runtime (Edge deprecated depuis Next.js 16) ───────────────────────
+export const runtime = 'nodejs';
 
 // ── Dimensions OG standard ────────────────────────────────────────────────────
 const W = 1200;
@@ -399,10 +399,8 @@ function buildFallback(fonts: Awaited<typeof ogFonts>) {
 }
 
 // ── Route handler principal ───────────────────────────────────────────────────
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { slug: string } }
-) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ slug: string }> }) {
+  const params = await props.params;
   const [shopData, fonts] = await Promise.all([
     fetchShopData(params.slug),
     ogFonts,

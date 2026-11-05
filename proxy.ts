@@ -73,7 +73,7 @@ function buildAngularUrl(slug: string, search: string): string {
 }
 
 // ── Middleware principal ───────────────────────────────────────────────────────
-export function middleware(request: NextRequest): NextResponse {
+export function proxy(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
 
   // ─── 1. Routes /shop/:slug ────────────────────────────────────────────────

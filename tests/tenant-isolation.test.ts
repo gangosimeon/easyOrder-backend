@@ -19,7 +19,7 @@ describe('isolation entre boutiques', () => {
 
   it('B ne voit pas le produit de A', async () => {
     const { b, productId } = await shopWithProduct();
-    const res = await getProduct(jsonRequest(`/api/products/${productId}`, undefined, { token: b.token }), { params: { id: productId } });
+    const res = await getProduct(jsonRequest(`/api/products/${productId}`, undefined, { token: b.token }), { params: Promise.resolve({ id: productId }) });
     expect(res.status).toBe(404);
 
     const list = await (await listProducts(jsonRequest('/api/products', undefined, { token: b.token }))).json();
@@ -30,17 +30,17 @@ describe('isolation entre boutiques', () => {
     const { a, b, productId } = await shopWithProduct();
     const put = await updateProduct(
       jsonRequest(`/api/products/${productId}`, { price: 1 }, { token: b.token, method: 'PUT' }),
-      { params: { id: productId } },
+      { params: Promise.resolve({ id: productId }) },
     );
     expect(put.status).toBe(404);
 
     const del = await deleteProduct(
       jsonRequest(`/api/products/${productId}`, undefined, { token: b.token, method: 'DELETE' }),
-      { params: { id: productId } },
+      { params: Promise.resolve({ id: productId }) },
     );
     expect(del.status).toBe(404);
 
-    const stillThere = await (await getProduct(jsonRequest(`/api/products/${productId}`, undefined, { token: a.token }), { params: { id: productId } })).json();
+    const stillThere = await (await getProduct(jsonRequest(`/api/products/${productId}`, undefined, { token: a.token }), { params: Promise.resolve({ id: productId }) })).json();
     expect(stillThere.data.price).toBe(12000);
   });
 });

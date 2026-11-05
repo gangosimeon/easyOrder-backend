@@ -1,5 +1,15 @@
+import { fileURLToPath } from 'url';
+import { dirname }       from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // ── Turbopack : ancre le projet pour éviter de remonter jusqu'à C:\Users\PC1 ──
+  turbopack: {
+    root: __dirname,
+  },
+
   // ── Standalone output : requis pour Docker (image ~80% plus petite) ──────────
   // Compatible avec `next start` — n'impacte pas le déploiement Render/Vercel.
   output: 'standalone',

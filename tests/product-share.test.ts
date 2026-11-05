@@ -17,7 +17,7 @@ async function shopWithProduct(phone: string) {
 }
 
 const get = (slug: string, id: string) =>
-  getPublicProduct(jsonRequest(`/api/public/shop/${slug}/products/${id}`), { params: { slug, id } });
+  getPublicProduct(jsonRequest(`/api/public/shop/${slug}/products/${id}`), { params: Promise.resolve({ slug, id }) });
 
 describe('lien de partage produit', () => {
   it('renvoie le produit de la boutique', async () => {

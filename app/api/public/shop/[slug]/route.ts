@@ -13,10 +13,8 @@ import { getActiveAnnoncesByShop } from '@/services/annonce.service';
 //   ?productLimit=20 (nb produits par page, défaut 20, max 100)
 // Rétrocompatible : sans params → retourne les 20 premiers produits
 
-export async function GET(
-  req: Request,
-  { params }: { params: { slug: string } }
-) {
+export async function GET(req: Request, props: { params: Promise<{ slug: string }> }) {
+  const params = await props.params;
   try {
     await connectDB();
 

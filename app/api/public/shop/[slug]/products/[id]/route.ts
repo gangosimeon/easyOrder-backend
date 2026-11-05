@@ -7,10 +7,8 @@ import Product from '@/models/product.model';
 
 // Un produit précis d'une boutique publique : sert au lien partagé
 // `/shop/:slug?p=:id`, quand le produit n'est pas dans la première page chargée.
-export async function GET(
-  _req: Request,
-  { params }: { params: { slug: string; id: string } }
-) {
+export async function GET(_req: Request, props: { params: Promise<{ slug: string; id: string }> }) {
+  const params = await props.params;
   try {
     if (!Types.ObjectId.isValid(params.id)) return res.notFound('Produit introuvable');
 

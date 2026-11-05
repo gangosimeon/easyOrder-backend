@@ -4,10 +4,8 @@ import { requireAuthUser } from '@/lib/auth';
 import * as res from '@/lib/api-response';
 import { getShopVisitStats } from '@/services/shop-visit.service';
 
-export async function GET(
-  req: Request,
-  { params }: { params: { shopId: string } }
-) {
+export async function GET(req: Request, props: { params: Promise<{ shopId: string }> }) {
+  const params = await props.params;
   try {
     await connectDB();
 

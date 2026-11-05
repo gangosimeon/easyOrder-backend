@@ -3,10 +3,8 @@ import { requireAuthUser } from '@/lib/auth';
 import * as res from '@/lib/api-response';
 import { toggleAnnonceActive } from '@/services/annonce.service';
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     await connectDB();
     const authUser = await requireAuthUser(req);

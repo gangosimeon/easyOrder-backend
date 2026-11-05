@@ -3,10 +3,8 @@ import { requireAdmin } from '@/lib/auth';
 import * as res from '@/lib/api-response';
 import { toggleAnnouncement } from '@/services/admin-announcement.service';
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     await connectDB();
     await requireAdmin(req);

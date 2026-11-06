@@ -30,6 +30,9 @@ export async function PUT(req: Request, props: { params: Promise<{ id: string }>
     const authUser = await requireAuthUser(req);
 
     const body = await req.json();
+    if ('external' in body) {
+      return res.badRequest('Le champ external est géré par la synchronisation GestStock et ne peut pas être modifié manuellement.');
+    }
     const parsed = updateCategorySchema.safeParse(body);
     if (!parsed.success) {
       return res.badRequest('Données invalides', parsed.error.flatten().fieldErrors);

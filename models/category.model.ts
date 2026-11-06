@@ -1,5 +1,8 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
 
+import type { IExternalRef } from './product.model';
+export type { IExternalRef };
+
 export interface ICategory extends Document {
   shopId: Types.ObjectId;
   name: string;
@@ -8,9 +11,20 @@ export interface ICategory extends Document {
   icon: string;
   color: string;
   description: string;
+  /** Posé par la synchronisation GestStock ; absent sur les catégories boutique pures. */
+  external?: IExternalRef;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const externalRefSchema = new Schema<IExternalRef>(
+  {
+    source:  { type: String, required: true },
+    id:      { type: String, required: true },
+    version: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
 
 const categorySchema = new Schema<ICategory>(
   {
@@ -20,6 +34,7 @@ const categorySchema = new Schema<ICategory>(
     icon:           { type: String, default: 'inventory_2' },
     color:          { type: String, default: '#FF6B35' },
     description:    { type: String, default: '' },
+    external:       { type: externalRefSchema },
   },
   { timestamps: true }
 );
@@ -29,6 +44,12 @@ categorySchema.index({ shopId: 1 });
 // Une même boutique ne peut pas avoir deux catégories de même nom (insensible
 // à la casse et aux espaces) ; deux boutiques différentes le peuvent.
 categorySchema.index({ shopId: 1, normalizedName: 1 }, { unique: true });
+
+// Au plus une association par (boutique, source, identifiant externe) — partiel : seulement si external.source existe.
+categorySchema.index(
+  { shopId: 1, 'external.source': 1, 'external.id': 1 },
+  { unique: true, partialFilterExpression: { 'external.source': { $exists: true } } }
+);
 
 const Category: Model<ICategory> =
   mongoose.models.Category ?? mongoose.model<ICategory>('Category', categorySchema);

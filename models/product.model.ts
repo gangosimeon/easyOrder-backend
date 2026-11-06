@@ -1,5 +1,12 @@
 import mongoose, { Document, Model, Schema, Types } from 'mongoose';
 
+/** Identifiant externe posé par la synchronisation GestStock (J6) — jamais écrit par l'API boutique. */
+export interface IExternalRef {
+  source: string;
+  id: string;
+  version: number;
+}
+
 export interface IProduct extends Document {
   shopId: Types.ObjectId;
   categoryId: Types.ObjectId;
@@ -12,9 +19,20 @@ export interface IProduct extends Document {
   unit: string;
   stock: number;
   inStock: boolean;
+  /** Posé par la synchronisation GestStock ; absent sur les produits boutique purs. */
+  external?: IExternalRef;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const externalRefSchema = new Schema<IExternalRef>(
+  {
+    source:  { type: String, required: true },
+    id:      { type: String, required: true },
+    version: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
 
 const productSchema = new Schema<IProduct>(
   {
@@ -29,6 +47,7 @@ const productSchema = new Schema<IProduct>(
     unit:          { type: String, default: '' },
     stock:         { type: Number, default: 0, min: 0 },
     inStock:       { type: Boolean, default: true },
+    external:      { type: externalRefSchema },
   },
   { timestamps: true }
 );
@@ -36,6 +55,11 @@ const productSchema = new Schema<IProduct>(
 productSchema.index({ shopId: 1 });
 productSchema.index({ categoryId: 1 });
 productSchema.index({ shopId: 1, categoryId: 1 });
+// Au plus une association par (boutique, source, identifiant externe) — partiel : seulement si external.source existe.
+productSchema.index(
+  { shopId: 1, 'external.source': 1, 'external.id': 1 },
+  { unique: true, partialFilterExpression: { 'external.source': { $exists: true } } }
+);
 
 const Product: Model<IProduct> =
   mongoose.models.Product ?? mongoose.model<IProduct>('Product', productSchema);

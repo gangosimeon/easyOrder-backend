@@ -16,12 +16,12 @@ import { GeststockLinkRepository } from '@/repositories/geststock-link.repositor
  *
  * Règles d'application :
  * 1. Bail d'exclusion (`leaseOwner` + `leaseUntil`) : un seul consommateur à la fois par liaison.
- * 2. Statuts terminaux (CURSOR_AHEAD, SNAPSHOT_REQUIRED, PAUSED, BLOCKED/UNKNOWN_EVENT) :
+ * 2. Statuts terminaux (CURSOR_AHEAD, PAUSED, BLOCKED/UNKNOWN_EVENT, BLOCKED/CURRENCY_MISMATCH) :
  *    aucun appel GestStock.
- * 3. BLOCKED/MISSING_CATEGORY : réessai au prochain cycle (appel GestStock depuis le dernier curseur).
+ * 3. BLOCKED/MISSING_CATEGORY : instantané automatique unique (D7) ; si blocage persistant après instantané → reste BLOCKED.
  * 4. Les CATEGORY sont traités avant les PRODUCT dans chaque page.
  * 5. Idempotence par version : `external.version < version reçue` pour tout upsert.
- * 6. ARCHIVE PRODUCT : masquage `inStock=false`, version-conditionné ; jamais de suppression.
+ * 6. ARCHIVE PRODUCT : masquage `visibleInShop=false`, version-conditionné ; `inStock` non touché ; jamais de suppression.
  * 7. ARCHIVE CATEGORY : curseur avancé (J10).
  * 8. PRODUCT_IMAGE : empreinte SHA-256 (`imageSha256`) enregistrée sur le produit (version-conditionné) ;
  *    curseur toujours avancé. Téléchargement différé dans `consumeImages()` (J9).
@@ -57,6 +57,8 @@ export interface ConsumeInput {
   /** ObjectId MongoDB de la boutique associée à la liaison. */
   shopId: string;
   credentials: LinkCredentials;
+  /** Devise ISO 4217 attendue pour la validation des pages d'instantané (lot 3, J8b, D4). */
+  expectedCurrency?: string;
 }
 
 /** Interface minimale requise pour la révocation locale de la liaison. */
@@ -92,6 +94,7 @@ export class CatalogConsumerService {
     let acquired: {
       after: number; acknowledgedSeq: number; status: string;
       blockedReason?: string | null; nextAttemptAt?: Date | null;
+      blockedAutoSnapshotDone?: boolean | null;
     } | null;
     try {
       acquired = await SyncState.findOneAndUpdate(
@@ -121,7 +124,24 @@ export class CatalogConsumerService {
     try {
       // --- 2. Statuts terminaux → aucun appel GestStock -----------------------------------
       if (TERMINAL_STATUSES.has(acquired.status)) return;
-      if (acquired.status === 'BLOCKED' && acquired.blockedReason === 'UNKNOWN_EVENT') return;
+      if (acquired.status === 'BLOCKED') {
+        const r = acquired.blockedReason;
+        if (r === 'UNKNOWN_EVENT' || r === 'CURRENCY_MISMATCH') return;
+        if (r === 'MISSING_CATEGORY') {
+          if (acquired.blockedAutoSnapshotDone) {
+            // Instantané déjà tenté pour cet incident : blocage persistant, intervention manuelle requise.
+            Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : MISSING_CATEGORY non résolu après instantané automatique — intervention manuelle requise.`);
+            return;
+          }
+          // D7 : instantané automatique unique par incident MISSING_CATEGORY.
+          await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+            $set: { blockedAutoSnapshotDone: true },
+          });
+          await this.consumeSnapshot(input, leaseOwner, state);
+          return;
+        }
+        // Raison inconnue : réessai au prochain cycle.
+      }
 
       // --- 2b. Instantané requis (J8) → consumeSnapshot au lieu du flux -------------------
       if (acquired.status === 'SNAPSHOT_REQUIRED') {
@@ -223,7 +243,7 @@ export class CatalogConsumerService {
         if (result === 'MISSING_CATEGORY') {
           Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, seq ${event.seq} : catégorie externe ${(event.data as { categoryId?: unknown }).categoryId} introuvable, curseur arrêté.`);
           await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
-            $set: { status: 'BLOCKED', blockedReason: 'MISSING_CATEGORY', blockedEventSeq: event.seq },
+            $set: { status: 'BLOCKED', blockedReason: 'MISSING_CATEGORY', blockedEventSeq: event.seq, blockedAutoSnapshotDone: false },
           });
           return false;
         }
@@ -341,6 +361,7 @@ export class CatalogConsumerService {
           name, description, unit,
           categoryId: jcmbCategory._id,
           externalPrice,
+          visibleInShop: true,
           'external.version': event.version,
         },
       }
@@ -376,7 +397,7 @@ export class CatalogConsumerService {
         'external.version': { $lt: event.version },
       },
       {
-        $set: { inStock: false, 'external.version': event.version },
+        $set: { visibleInShop: false, 'external.version': event.version },
       }
     );
   }
@@ -569,7 +590,7 @@ export class CatalogConsumerService {
    * le statut est SNAPSHOT_REQUIRED. Les sections sont ordonnées CATEGORIES → PRODUCTS :
    * les catégories sont garanties présentes quand les produits arrivent.
    *
-   * Après l'instantané : réconciliation (produits GestStock absents → `inStock=false`),
+   * Après l'instantané : réconciliation (produits GestStock absents → `visibleInShop=false`),
    * curseur posé à `asOfSeq`, statut IDLE, accusé de réception envoyé.
    */
   private async consumeSnapshot(
@@ -577,15 +598,17 @@ export class CatalogConsumerService {
     leaseOwner: string,
     state: { after: number; acknowledgedSeq: number },
   ): Promise<void> {
-    // Statut SYNCING pendant l'instantané
+    // D3 : effacer le blocage précédent et passer en SYNCING
     await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
-      $set: { status: 'SYNCING', nextAttemptAt: null },
+      $set: { status: 'SYNCING', nextAttemptAt: null, blockedReason: null, blockedEventSeq: null },
     });
 
+    // Réconciliation des catégories : J10
     const seenCategoryIds = new Set<string>();
     const seenProductIds  = new Set<string>();
     let pageToken: string | undefined;
     let asOfSeq: number | undefined;
+    let pageCurrency: string | undefined;
 
     while (true) {
       let page: SnapshotPage;
@@ -597,6 +620,24 @@ export class CatalogConsumerService {
       }
 
       if (asOfSeq === undefined) asOfSeq = page.asOfSeq;
+
+      // D4 : vérifier la devise sur chaque page (cohérence inter-pages et conformité à la liaison)
+      if (pageCurrency === undefined) {
+        pageCurrency = page.currency;
+      } else if (page.currency !== pageCurrency) {
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : devise incohérente entre pages (« ${pageCurrency} » puis « ${page.currency} ») — CURRENCY_MISMATCH.`);
+        await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+          $set: { status: 'BLOCKED', blockedReason: 'CURRENCY_MISMATCH', blockedEventSeq: null },
+        });
+        return;
+      }
+      if (input.expectedCurrency && page.currency !== input.expectedCurrency) {
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : devise « ${page.currency} » ≠ devise attendue « ${input.expectedCurrency} » — CURRENCY_MISMATCH.`);
+        await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+          $set: { status: 'BLOCKED', blockedReason: 'CURRENCY_MISMATCH', blockedEventSeq: null },
+        });
+        return;
+      }
 
       // Catégories en premier (garanties avant les produits par l'ordre des sections GestStock)
       for (const item of page.categories) {
@@ -640,23 +681,24 @@ export class CatalogConsumerService {
       pageToken = page.nextPageToken;
     }
 
-    // Réconciliation : produits GestStock absents de l'instantané → masquer
-    if (seenProductIds.size > 0) {
-      await Product.updateMany(
-        {
-          shopId: input.shopId,
-          'external.source': 'geststock',
-          'external.id': { $nin: Array.from(seenProductIds) },
-          inStock: true,
-        },
-        { $set: { inStock: false } }
-      );
+    // D1 : réconciliation sans garde — masquer tous les produits GestStock absents de l'instantané
+    const reconResult = await Product.updateMany(
+      {
+        shopId: input.shopId,
+        'external.source': 'geststock',
+        'external.id': { $nin: Array.from(seenProductIds) },
+        visibleInShop: { $ne: false },
+      },
+      { $set: { visibleInShop: false } }
+    );
+    if (reconResult.modifiedCount > 0) {
+      Logger.info(`Consommateur GestStock — liaison ${input.linkId} : réconciliation, ${reconResult.modifiedCount} produit(s) masqué(s).`);
     }
 
-    // Curseur posé à asOfSeq ; accusé de réception
+    // D3 : curseur posé à asOfSeq ; statut IDLE ; blocage effacé
     const finalSeq = asOfSeq ?? 0;
     await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
-      $set: { after: finalSeq, status: 'IDLE' },
+      $set: { after: finalSeq, status: 'IDLE', blockedReason: null, blockedEventSeq: null, blockedAutoSnapshotDone: null },
     });
     state.after = finalSeq;
 

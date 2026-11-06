@@ -31,7 +31,7 @@ export async function GET(req: Request, props: { params: Promise<{ slug: string 
 
     const [categories, productResult, announcements] = await Promise.all([
       Category.find({ shopId }).sort({ createdAt: 1 }).lean(),
-      Product.find({ shopId })
+      Product.find({ shopId, visibleInShop: { $ne: false } })
         .sort({ createdAt: -1 })
         .skip(productSkip)
         .limit(productLimit)
@@ -39,7 +39,7 @@ export async function GET(req: Request, props: { params: Promise<{ slug: string 
       getActiveAnnoncesByShop(shopId),
     ]);
 
-    const productTotal = await Product.countDocuments({ shopId });
+    const productTotal = await Product.countDocuments({ shopId, visibleInShop: { $ne: false } });
 
     const shopCountryCode = shop.countryCode ?? '';
     const company = {

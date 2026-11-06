@@ -5,6 +5,7 @@ import { connectDB } from '@/lib/db';
 import Category from '@/models/category.model';
 import Product from '@/models/product.model';
 import SyncState from '@/models/syncstate.model';
+import GeststockLink from '@/models/geststock-link.model';
 import { CatalogConsumerService, type ConsumeInput, type LinkRevoker } from '@/services/catalog-consumer.service';
 import type { CatalogChangePage, SnapshotPage, GeststockClient } from '@/lib/geststock-client';
 
@@ -66,12 +67,24 @@ async function createShopId(): Promise<string> {
   return user.insertedId.toString();
 }
 
+/** Crée une boutique fictive avec son slug (utile pour les tests de routes publiques). */
+async function createShop(): Promise<{ shopId: string; slug: string }> {
+  const slug = 'boutique-' + new mongoose.Types.ObjectId().toString();
+  const user = await mongoose.connection.collection('users').insertOne({
+    name: 'Boutique Test',
+    phone: '70' + Math.floor(Math.random() * 1_000_000).toString().padStart(6, '0'),
+    countryCode: '226', password: 'hashed', role: 'user', slug,
+  });
+  return { shopId: user.insertedId.toString(), slug };
+}
+
 describe('CatalogConsumerService (lot 3, J7b)', () => {
   beforeAll(async () => {
     await connectDB();
     await Category.init();
     await Product.init();
     await SyncState.init();
+    await GeststockLink.init();
   });
 
   // --- État de synchronisation -------------------------------------------------------
@@ -305,7 +318,7 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       expect(await Product.findOne({ shopId, 'external.id': prodId }).lean()).toBeNull();
     });
 
-    it('ARCHIVE → masque inStock=false, version-conditionné, produit non supprimé', async () => {
+    it('ARCHIVE → visibleInShop=false, inStock conservé, version-conditionné, produit non supprimé', async () => {
       const shopId = await createShopId();
       const { linkId, input } = makeTest();
       const catId = 'cat-' + new mongoose.Types.ObjectId().toString();
@@ -323,8 +336,9 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       }]);
       await service.consume(input(shopId));
       const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
-      expect(prod).not.toBeNull();          // non supprimé
-      expect(prod?.inStock).toBe(false);    // masqué
+      expect(prod).not.toBeNull();              // non supprimé
+      expect(prod?.visibleInShop).toBe(false);  // masqué via visibleInShop
+      expect(prod?.inStock).toBe(true);         // inStock non touché
       expect(prod?.external?.version).toBe(2);
       expect((await SyncState.findOne({ linkId }).lean())?.after).toBe(1);
     });
@@ -347,7 +361,8 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       }]);
       await service.consume(input(shopId));
       const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
-      expect(prod?.inStock).toBe(true);     // non masqué (version trop ancienne)
+      expect(prod?.visibleInShop).not.toBe(false); // non masqué (version trop ancienne)
+      expect(prod?.inStock).toBe(true);
       expect(prod?.external?.version).toBe(5);
     });
   });
@@ -481,7 +496,8 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
   // --- Statuts terminaux → aucun appel GestStock -------------------------------------
 
   describe('Statuts terminaux', () => {
-    for (const status of ['CURSOR_AHEAD', 'SNAPSHOT_REQUIRED', 'PAUSED'] as const) {
+    // D5 : SNAPSHOT_REQUIRED n'est pas terminal — il déclenche consumeSnapshot (testé dans le describe J8).
+    for (const status of ['CURSOR_AHEAD', 'PAUSED'] as const) {
       it(`statut ${status} → aucun appel GestStock`, async () => {
         const shopId = await createShopId();
         const { linkId, input } = makeTest();
@@ -503,16 +519,25 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       expect(mockGetChanges).not.toHaveBeenCalled();
     });
 
-    it('BLOCKED/MISSING_CATEGORY → réessai au prochain cycle (appel GestStock effectué)', async () => {
+    it('BLOCKED/MISSING_CATEGORY sans autoSnapshot → déclenche consumeSnapshot (D7)', async () => {
       const shopId = await createShopId();
       const { linkId, input } = makeTest();
-      const { service, mockGetChanges } = makeService([{ items: [], hasMore: false, lastSeq: 0 }]);
+      const { service, mockGetChanges, mockGetSnapshot } = (() => {
+        const { service: s, mockGetChanges: mgc } = makeService([]);
+        const mockGetSnapshot = vi.fn(async () => ({ asOfSeq: 0, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null }));
+        // On utilise makeSnapshotService car makeService mock aussi getSnapshot — on vérifie juste que getCatalogChanges n'est PAS appelé
+        return { service: s, mockGetChanges: mgc, mockGetSnapshot };
+      })();
       await SyncState.create({
         linkId, after: 0, acknowledgedSeq: 0, status: 'BLOCKED',
-        blockedReason: 'MISSING_CATEGORY', blockedEventSeq: 1,
+        blockedReason: 'MISSING_CATEGORY', blockedEventSeq: 1, blockedAutoSnapshotDone: false,
       });
       await service.consume(input(shopId));
-      expect(mockGetChanges).toHaveBeenCalled();
+      // D7 : consumeSnapshot est appelé, getCatalogChanges ne l'est pas
+      expect(mockGetChanges).not.toHaveBeenCalled();
+      // État final : IDLE (l'instantané a réussi grâce au mock de makeService)
+      const state = await SyncState.findOne({ linkId }).lean();
+      expect(state?.status).toBe('IDLE');
     });
   });
 
@@ -723,7 +748,7 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       }]);
       await service.consume(input(shopId));
       const gone = await Product.findOne({ shopId, 'external.id': prodIdGone }).lean();
-      expect(gone?.inStock).toBe(false);
+      expect(gone?.visibleInShop).toBe(false);  // masqué via visibleInShop (D6)
     });
 
     it('après instantané : statut IDLE, after=asOfSeq, accusé de réception envoyé', async () => {
@@ -803,6 +828,251 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       const service = new CatalogConsumerService(client);
       await service.consume(input(shopId));
       expect((await SyncState.findOne({ linkId }).lean())?.status).toBe('PAUSED');
+    });
+
+    // D1 : réconciliation sans garde
+    it('D1 — instantané avec products:[] → produits GestStock locaux masqués (visibleInShop=false)', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-d1-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'Cat', normalizedName: 'cat',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      // Produit GestStock existant, non repris dans l'instantané
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Orphelin', price: 500,
+        inStock: true, visibleInShop: true,
+        external: { source: 'geststock', id: 'prod-orphelin', version: 1 } });
+      // Produit boutique pure (pas de source geststock) → jamais touché
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Boutique', price: 500 });
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 10, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const orphelin = await Product.findOne({ shopId, 'external.id': 'prod-orphelin' }).lean();
+      expect(orphelin?.visibleInShop).toBe(false);  // masqué
+      expect(orphelin?.inStock).toBe(true);          // inStock conservé
+      // Produit boutique pure : visibleInShop toujours true
+      const boutique = await Product.findOne({ shopId, name: 'Boutique' }).lean();
+      expect(boutique?.visibleInShop).not.toBe(false);
+    });
+
+    // D3 : blockedReason effacé pendant et après l'instantané
+    it('D3 — blockedReason et blockedEventSeq effacés après instantané réussi', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      // Partir d'un état BLOCKED/MISSING_CATEGORY avec blockedEventSeq posé
+      await SyncState.create({
+        linkId, after: 0, acknowledgedSeq: 0,
+        status: 'SNAPSHOT_REQUIRED',
+        blockedReason: 'MISSING_CATEGORY', blockedEventSeq: 7,
+      });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 20, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const state = await SyncState.findOne({ linkId }).lean();
+      expect(state?.status).toBe('IDLE');
+      expect(state?.blockedReason).toBeNull();
+      expect(state?.blockedEventSeq).toBeNull();
+    });
+  });
+
+  // --- Devise (lot 3, J8b, D4) ---------------------------------------------------------
+
+  describe('Devise (lot 3, J8b, D4)', () => {
+    it('devise différente de expectedCurrency → BLOCKED/CURRENCY_MISMATCH, curseur inchangé', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 10, currency: 'EUR',   // ≠ 'XOF' attendu
+        categories: [], products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume({ ...input(shopId), expectedCurrency: 'XOF' });
+      const state = await SyncState.findOne({ linkId }).lean();
+      expect(state?.status).toBe('BLOCKED');
+      expect(state?.blockedReason).toBe('CURRENCY_MISMATCH');
+      expect(state?.after).toBe(0);  // curseur inchangé
+    });
+
+    it('devise incohérente entre pages → BLOCKED/CURRENCY_MISMATCH sur la deuxième page', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-dev-' + new mongoose.Types.ObjectId().toString();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([
+        { asOfSeq: 20, currency: 'XOF', categories: [{ id: catId, name: 'Cat', description: '', version: 1 }], products: [], productImages: [], nextPageToken: 'tok2' },
+        { asOfSeq: 20, currency: 'EUR', categories: [], products: [], productImages: [], nextPageToken: null },
+      ]);
+      await service.consume({ ...input(shopId), expectedCurrency: 'XOF' });
+      const state = await SyncState.findOne({ linkId }).lean();
+      expect(state?.status).toBe('BLOCKED');
+      expect(state?.blockedReason).toBe('CURRENCY_MISMATCH');
+      expect(state?.after).toBe(0);    // curseur inchangé
+      // Catégorie de la page 1 créée (page 1 était correcte)
+      expect(await Category.findOne({ shopId, 'external.id': catId }).lean()).not.toBeNull();
+    });
+
+    it('BLOCKED/CURRENCY_MISMATCH → aucun appel GestStock au cycle suivant', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const { service, mockGetChanges } = makeService([]);
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'BLOCKED', blockedReason: 'CURRENCY_MISMATCH' });
+      await service.consume(input(shopId));
+      expect(mockGetChanges).not.toHaveBeenCalled();
+    });
+
+    it('devise correcte sur toutes les pages → instantané complète normalement', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 15, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume({ ...input(shopId), expectedCurrency: 'XOF' });
+      expect((await SyncState.findOne({ linkId }).lean())?.status).toBe('IDLE');
+    });
+  });
+
+  // --- Sortie de BLOCKED/MISSING_CATEGORY (lot 3, J8b, D7) ----------------------------
+
+  describe('Sortie de BLOCKED/MISSING_CATEGORY (lot 3, J8b, D7)', () => {
+    it('BLOCKED/MISSING_CATEGORY sans autoSnapshot → déclenche consumeSnapshot, récupère IDLE', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-d7-' + new mongoose.Types.ObjectId().toString();
+      await SyncState.create({
+        linkId, after: 5, acknowledgedSeq: 5,
+        status: 'BLOCKED', blockedReason: 'MISSING_CATEGORY', blockedEventSeq: 6,
+        blockedAutoSnapshotDone: false,
+      });
+      const { service, mockGetSnapshot } = makeSnapshotService([{
+        asOfSeq: 10, currency: 'XOF',
+        categories: [{ id: catId, name: 'CatD7', description: '', version: 1 }],
+        products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      expect(mockGetSnapshot).toHaveBeenCalled();
+      const state = await SyncState.findOne({ linkId }).lean();
+      expect(state?.status).toBe('IDLE');
+      expect(state?.after).toBe(10);
+      expect(state?.blockedAutoSnapshotDone).toBeNull();  // effacé après IDLE
+    });
+
+    it('BLOCKED/MISSING_CATEGORY avec autoSnapshot=true → reste BLOCKED, aucun appel GestStock', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const { service, mockGetSnapshot } = makeSnapshotService([]);
+      await SyncState.create({
+        linkId, after: 0, acknowledgedSeq: 0,
+        status: 'BLOCKED', blockedReason: 'MISSING_CATEGORY', blockedEventSeq: 1,
+        blockedAutoSnapshotDone: true,
+      });
+      await service.consume(input(shopId));
+      expect(mockGetSnapshot).not.toHaveBeenCalled();
+      expect((await SyncState.findOne({ linkId }).lean())?.status).toBe('BLOCKED');
+    });
+
+    it('BLOCKED/UNKNOWN_EVENT → aucun appel GestStock', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const { service, mockGetChanges } = makeService([]);
+      await SyncState.create({
+        linkId, after: 0, acknowledgedSeq: 0,
+        status: 'BLOCKED', blockedReason: 'UNKNOWN_EVENT', blockedEventSeq: 3,
+      });
+      await service.consume(input(shopId));
+      expect(mockGetChanges).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- Visibilité GestStock (lot 3, J8b, D6) ------------------------------------------
+
+  describe('Visibilité GestStock (lot 3, J8b, D6)', () => {
+    it('UPSERT plus récent sur produit archivé → visibleInShop=true (rétablissement)', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-vis-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-vis-' + new mongoose.Types.ObjectId().toString();
+      const cat = await Category.create({ shopId, name: 'CatVis', normalizedName: 'catvis',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      // Produit archivé (visibleInShop=false)
+      await Product.create({ shopId, categoryId: cat._id, name: 'Archivé', price: 1000,
+        visibleInShop: false, external: { source: 'geststock', id: prodId, version: 2 } });
+      const { service } = makeService([{
+        items: [{
+          seq: 3, type: 'PRODUCT', objectId: prodId, version: 3,
+          operation: 'UPSERT', occurredAt: '2026-01-03T12:00:00Z',
+          data: { id: prodId, name: 'Rétabli', description: '', categoryId: catId, unit: 'pièce', referencePrice: '2000.00', active: true, version: 3 },
+        }],
+        hasMore: false, lastSeq: 3,
+      }]);
+      await service.consume(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.visibleInShop).toBe(true);
+      expect(prod?.name).toBe('Rétabli');
+    });
+
+    it('inStock=true posé manuellement sur un produit archivé → visibleInShop reste false', async () => {
+      const shopId = await createShopId();
+      const catId = 'cat-instock-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-instock-' + new mongoose.Types.ObjectId().toString();
+      const cat = await Category.create({ shopId, name: 'CatIS', normalizedName: 'catis',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      await Product.create({ shopId, categoryId: cat._id, name: 'Archivé', price: 500,
+        visibleInShop: false, inStock: false,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      // Le commerçant remet inStock=true manuellement
+      await Product.updateOne({ shopId, 'external.id': prodId }, { $set: { inStock: true } });
+      // visibleInShop doit rester false
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.inStock).toBe(true);
+      expect(prod?.visibleInShop).toBe(false);
+    });
+
+    it('produit sans external.source=geststock → jamais touché par la réconciliation', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-pure-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatPure', normalizedName: 'catpure',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      // Produit boutique pure (pas d'external)
+      const pureProd = await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'ProdPur', price: 1000, visibleInShop: true });
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 5, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const after = await Product.findById(pureProd._id).lean();
+      expect(after?.visibleInShop).not.toBe(false);
+    });
+
+    it('route GET /api/public/shop/[slug] → n\'affiche pas un produit masqué (visibleInShop=false)', async () => {
+      const { shopId, slug } = await createShop();
+      const catId = new mongoose.Types.ObjectId();
+      // Produit visible
+      await Product.create({ shopId, categoryId: catId, name: 'Visible', price: 1000, visibleInShop: true });
+      // Produit masqué
+      await Product.create({ shopId, categoryId: catId, name: 'Masqué', price: 500, visibleInShop: false });
+      const { GET } = await import('@/app/api/public/shop/[slug]/route');
+      const req = new Request(`http://localhost/api/public/shop/${slug}`);
+      const resp = await GET(req, { params: Promise.resolve({ slug }) });
+      const json = await resp.json() as { data: { products: Array<{ name: string }> } };
+      const names = json.data.products.map((p) => p.name);
+      expect(names).toContain('Visible');
+      expect(names).not.toContain('Masqué');
+    });
+
+    it('route GET /api/public/shop/[slug]/products/[id] → 404 si produit masqué', async () => {
+      const { shopId, slug } = await createShop();
+      const catId = new mongoose.Types.ObjectId();
+      const hidden = await Product.create({ shopId, categoryId: catId, name: 'Caché', price: 500, visibleInShop: false });
+      const { GET } = await import('@/app/api/public/shop/[slug]/products/[id]/route');
+      const req = new Request(`http://localhost/api/public/shop/${slug}/products/${hidden._id}`);
+      const resp = await GET(req, { params: Promise.resolve({ slug, id: hidden._id.toString() }) });
+      expect(resp.status).toBe(404);
     });
   });
 

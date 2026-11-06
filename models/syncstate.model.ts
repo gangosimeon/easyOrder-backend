@@ -22,7 +22,7 @@ import mongoose, { Document, Model, Schema } from 'mongoose';
 export const SYNCSTATE_STATUSES = ['IDLE', 'SYNCING', 'BLOCKED', 'CURSOR_AHEAD', 'SNAPSHOT_REQUIRED', 'PAUSED'] as const;
 export type SyncStateStatus = (typeof SYNCSTATE_STATUSES)[number];
 
-export type BlockedReason = 'MISSING_CATEGORY' | 'UNKNOWN_EVENT';
+export type BlockedReason = 'MISSING_CATEGORY' | 'UNKNOWN_EVENT' | 'CURRENCY_MISMATCH';
 
 export interface ISyncState extends Document {
   linkId: string;
@@ -33,6 +33,8 @@ export interface ISyncState extends Document {
   leaseUntil: Date | null;
   blockedReason?: BlockedReason | null;
   blockedEventSeq?: number | null;
+  /** D7 (lot 3, J8b) : instantané automatique déjà déclenché pour ce BLOCKED/MISSING_CATEGORY. Effacé dès l'atteinte de IDLE. */
+  blockedAutoSnapshotDone?: boolean | null;
   nextAttemptAt?: Date | null;
   /** Backoff spécifique aux téléchargements d'images (lot 3, J9) ; distinct de `nextAttemptAt`. */
   imageNextAttemptAt?: Date | null;
@@ -48,8 +50,9 @@ const syncStateSchema = new Schema<ISyncState>(
     status:          { type: String, enum: SYNCSTATE_STATUSES, required: true, default: 'IDLE' },
     leaseOwner:      { type: String, default: null },
     leaseUntil:      { type: Date, default: null },
-    blockedReason:   { type: String, enum: ['MISSING_CATEGORY', 'UNKNOWN_EVENT'], default: null },
+    blockedReason:   { type: String, enum: ['MISSING_CATEGORY', 'UNKNOWN_EVENT', 'CURRENCY_MISMATCH'], default: null },
     blockedEventSeq: { type: Number, default: null, min: 0 },
+    blockedAutoSnapshotDone: { type: Boolean, default: null },
     nextAttemptAt:      { type: Date, default: null },
     imageNextAttemptAt: { type: Date, default: null },
   },

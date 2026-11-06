@@ -88,7 +88,7 @@ export async function GET(req: Request) {
           from:     'products',
           let:      { sid: '$_id' },
           pipeline: [
-            { $match: { $expr: { $eq: ['$shopId', '$$sid'] } } },
+            { $match: { $expr: { $eq: ['$shopId', '$$sid'] }, visibleInShop: { $ne: false } } },
             { $count: 'n' },
           ],
           as: '_pCount',
@@ -107,7 +107,7 @@ export async function GET(req: Request) {
           from:     'products',
           let:      { sid: '$_id' },
           pipeline: [
-            { $match: { $expr: { $eq: ['$shopId', '$$sid'] }, image: { $ne: '' } } },
+            { $match: { $expr: { $eq: ['$shopId', '$$sid'] }, image: { $ne: '' }, visibleInShop: { $ne: false } } },
             { $sort:  { createdAt: -1 } },
             { $limit: 4 },
             { $project: { image: 1, name: 1 } },

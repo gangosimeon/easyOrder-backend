@@ -19,6 +19,13 @@ export interface IProduct extends Document {
   unit: string;
   stock: number;
   inStock: boolean;
+  /**
+   * Visibilité contrôlée par la synchronisation GestStock (lot 3, J8b, D6).
+   * `false` = masqué par un événement ARCHIVE ou par la réconciliation de l'instantané.
+   * Indépendant de `inStock` (stock commerçant) : un produit masqué reste masqué même si `inStock` repasse à `true`.
+   * Jamais modifié sur les produits sans `external.source = 'geststock'`.
+   */
+  visibleInShop: boolean;
   /** Posé par la synchronisation GestStock ; absent sur les produits boutique purs. */
   external?: IExternalRef;
   /** Prix de référence GestStock (lot 3, J7b) ; jamais écrit par l'API boutique. */
@@ -55,6 +62,7 @@ const productSchema = new Schema<IProduct>(
     unit:          { type: String, default: '' },
     stock:         { type: Number, default: 0, min: 0 },
     inStock:       { type: Boolean, default: true },
+    visibleInShop: { type: Boolean, default: true },
     external:      { type: externalRefSchema },
     externalPrice: { type: Number, min: 0 },
     imageSha256:   { type: String, default: null },
@@ -67,6 +75,8 @@ const productSchema = new Schema<IProduct>(
 productSchema.index({ shopId: 1 });
 productSchema.index({ categoryId: 1 });
 productSchema.index({ shopId: 1, categoryId: 1 });
+// Filtre de visibilité GestStock : routes publiques excluent visibleInShop=false (J8b, D6).
+productSchema.index({ shopId: 1, visibleInShop: 1 });
 // Au plus une association par (boutique, source, identifiant externe) — partiel : seulement si external.source existe.
 productSchema.index(
   { shopId: 1, 'external.source': 1, 'external.id': 1 },

@@ -16,7 +16,7 @@ export async function GET(_req: Request, props: { params: Promise<{ slug: string
     const shop = await User.findOne({ slug: params.slug, banned: { $ne: true } }).select('_id').lean();
     if (!shop) return res.notFound('Boutique introuvable');
 
-    const product = await Product.findOne({ _id: params.id, shopId: shop._id.toString() }).lean();
+    const product = await Product.findOne({ _id: params.id, shopId: shop._id.toString(), visibleInShop: { $ne: false } }).lean();
     if (!product) return res.notFound('Produit introuvable');
 
     return NextResponse.json(

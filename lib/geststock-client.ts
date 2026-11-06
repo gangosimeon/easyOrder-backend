@@ -168,7 +168,7 @@ export interface LinkCredentials {
  * - `not_found`    : produit inexistant, d'une autre entreprise ou sans image (G19-D3).
  */
 export type ProductImageResult =
-  | { kind: 'image'; data: Buffer; etag: string }
+  | { kind: 'image'; data: Buffer; etag: string | null }
   | { kind: 'not_modified' }
   | { kind: 'not_found' };
 
@@ -518,7 +518,13 @@ export class GeststockClient {
     if (result.status === 304) return { kind: 'not_modified' };
     if (result.status === 200 && result.binary) {
       const rawEtag = result.headers.get('etag') ?? '';
-      const receivedEtag = rawEtag.replace(/^W\/"?/, '').replace(/^"(.*)"$/, '$1');
+      // ETag faible (W/"...") rejeté : ne représente pas une correspondance byte-for-byte (RFC 7232 §2.3).
+      // GestStock garantit des ETags forts pour les images ; un ETag faible est ignoré.
+      if (rawEtag.startsWith('W/')) {
+        Logger.warn(`getCatalogProductImage (${credentials.linkId}) : ETag faible reçu (${rawEtag}), ignoré.`);
+        return { kind: 'image', data: result.binary, etag: null };
+      }
+      const receivedEtag = rawEtag.replace(/^"(.*)"$/, '$1') || null;
       return { kind: 'image', data: result.binary, etag: receivedEtag };
     }
     if (result.status === 404 && errorCode(result.body) === 'PRODUCT_IMAGE_NOT_FOUND') {

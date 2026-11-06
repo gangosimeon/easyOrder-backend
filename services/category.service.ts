@@ -70,8 +70,26 @@ export async function updateCategory(id: string, shopId: string, data: UpdateCat
 }
 
 export async function deleteCategory(id: string, shopId: string) {
-  const cat = await Category.findOneAndDelete({ _id: id, shopId });
+  const cat = await Category.findOne({ _id: id, shopId }).lean();
   if (!cat) throw Object.assign(new Error('Catégorie introuvable'), { status: 404 });
+
+  // J10.3 : protection — catégorie GestStock avec produits synchro visibles → 409
+  if (cat.external?.source === 'geststock') {
+    const count = await Product.countDocuments({
+      categoryId: id,
+      shopId,
+      'external.source': 'geststock',
+      visibleInShop: { $ne: false },
+    });
+    if (count > 0) {
+      throw Object.assign(
+        new Error(`Catégorie synchronisée : ${count} produit(s) GestStock visible(s). Masquez-les depuis GestStock avant de supprimer la catégorie.`),
+        { status: 409 },
+      );
+    }
+  }
+
+  await Category.deleteOne({ _id: id, shopId });
   await Product.deleteMany({ categoryId: id, shopId });
   return cat;
 }

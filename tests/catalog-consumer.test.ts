@@ -200,7 +200,7 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       expect(cat?.external?.version).toBe(5);
     });
 
-    it('ARCHIVE → curseur avancé, catégorie non supprimée', async () => {
+    it('ARCHIVE sans produits GestStock → catégorie supprimée, curseur avancé', async () => {
       const shopId = await createShopId();
       const { linkId, input } = makeTest();
       const catId = 'cat-' + new mongoose.Types.ObjectId().toString();
@@ -214,7 +214,7 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
         hasMore: false, lastSeq: 1,
       }]);
       await service.consume(input(shopId));
-      expect(await Category.findById(cat._id).lean()).not.toBeNull();
+      expect(await Category.findById(cat._id).lean()).toBeNull();
       const state = await SyncState.findOne({ linkId }).lean();
       expect(state?.after).toBe(1);
     });
@@ -1304,6 +1304,146 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       const service = new CatalogConsumerService(client);
       await service.consumeImages(input(shopId));
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- ETag faible (lot 3, B5-D1) ------------------------------------------------
+
+  describe('ETag faible (lot 3, B5-D1)', () => {
+    it('consumeImages : etag=null (ETag faible rejeté par le client) → imageETag existant conservé, non écrasé', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-wetag-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-wetag-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatWEtag', normalizedName: 'catwetag',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      const sha = 'd'.repeat(64);
+      const oldEtag = 'e'.repeat(64);
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Prod', price: 1000,
+        imageSha256: sha, imageVersion: 1, imageETag: oldEtag,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      await SyncState.create({ linkId, after: 10, acknowledgedSeq: 10, status: 'IDLE' });
+      // Le client retourne etag: null (ETag faible rejeté par la couche client)
+      const client = {
+        getCatalogChanges:    vi.fn(),
+        acknowledgeChanges:   vi.fn(),
+        getSnapshot:          vi.fn(),
+        getCatalogProductImage: vi.fn(async () => ({ kind: 'image' as const, data: Buffer.from('jpeg'), etag: null })),
+      } as unknown as GeststockClient;
+      const service = new CatalogConsumerService(client);
+      await service.consumeImages(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      // imageETag doit rester à l'ancienne valeur (non écrasée par null)
+      expect(prod?.imageETag).toBe(oldEtag);
+    });
+  });
+
+  // --- ARCHIVE CATEGORY (lot 3, J10) ---------------------------------------------
+
+  describe('ARCHIVE CATEGORY (lot 3, J10)', () => {
+    it('ARCHIVE CATEGORY sans produits GestStock visibles → catégorie supprimée', async () => {
+      const shopId = await createShopId();
+      const { input } = makeTest();
+      const catId = 'cat-arc-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatArc', normalizedName: 'catarc',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const { service } = makeService([{
+        items: [{
+          seq: 5, type: 'CATEGORY', objectId: catId, version: 2,
+          operation: 'ARCHIVE', occurredAt: '2026-01-05T12:00:00Z', data: null as unknown as Record<string, unknown>,
+        }],
+        hasMore: false, lastSeq: 5,
+      }]);
+      await service.consume(input(shopId));
+      const cat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      expect(cat).toBeNull();
+    });
+
+    it('ARCHIVE CATEGORY avec produits GestStock visibles → catégorie conservée', async () => {
+      const shopId = await createShopId();
+      const { input } = makeTest();
+      const catId = 'cat-arc2-' + new mongoose.Types.ObjectId().toString();
+      const cat = await Category.create({ shopId, name: 'CatArc2', normalizedName: 'catarc2',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const prodId = 'prod-arc2-' + new mongoose.Types.ObjectId().toString();
+      await Product.create({ shopId, categoryId: cat._id, name: 'Prod', price: 1000,
+        visibleInShop: true, external: { source: 'geststock', id: prodId, version: 1 } });
+      const { service } = makeService([{
+        items: [{
+          seq: 6, type: 'CATEGORY', objectId: catId, version: 2,
+          operation: 'ARCHIVE', occurredAt: '2026-01-06T12:00:00Z', data: null as unknown as Record<string, unknown>,
+        }],
+        hasMore: false, lastSeq: 6,
+      }]);
+      await service.consume(input(shopId));
+      const catAfter = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      expect(catAfter).not.toBeNull();
+    });
+  });
+
+  // --- Réconciliation des catégories (lot 3, J10) ---------------------------------
+
+  describe('Réconciliation des catégories (lot 3, J10)', () => {
+    it('instantané contenant la catégorie → aucune suppression', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-rec-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatRec', normalizedName: 'catrec',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 10, currency: 'XOF',
+        categories: [{ id: catId, name: 'CatRec', description: '', version: 2 }],
+        products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const cat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      expect(cat).not.toBeNull();
+    });
+
+    it('catégorie GestStock absente du snapshot, sans produits visibles → supprimée', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catPresent = 'cat-present-' + new mongoose.Types.ObjectId().toString();
+      const catGone    = 'cat-gone-'    + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatPresente', normalizedName: 'catpresente',
+        external: { source: 'geststock', id: catPresent, version: 1 } });
+      await Category.create({ shopId, name: 'CatGone', normalizedName: 'catgone',
+        external: { source: 'geststock', id: catGone, version: 1 } });
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 10, currency: 'XOF',
+        categories: [{ id: catPresent, name: 'CatPresente', description: '', version: 1 }],
+        products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      expect(await Category.findOne({ shopId, 'external.id': catGone }).lean()).toBeNull();
+      expect(await Category.findOne({ shopId, 'external.id': catPresent }).lean()).not.toBeNull();
+    });
+
+    it('catégorie GestStock absente du snapshot, avec produits GestStock visibles → conservée', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-keep-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-keep-' + new mongoose.Types.ObjectId().toString();
+      const cat = await Category.create({ shopId, name: 'CatKeep', normalizedName: 'catkeep',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      await Product.create({ shopId, categoryId: cat._id, name: 'Prod', price: 1000,
+        visibleInShop: true, external: { source: 'geststock', id: prodId, version: 1 } });
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      // Le produit est inclus dans le snapshot (seenProductIds) pour ne pas être masqué
+      // par la réconciliation des produits avant la réconciliation des catégories.
+      // La catégorie n'est PAS dans le snapshot → orpheline mais conservée (a des produits visibles).
+      const { service } = makeSnapshotService([{
+        asOfSeq: 10, currency: 'XOF',
+        categories: [],
+        products: [{ id: prodId, name: 'Prod', categoryId: catId, description: '', unit: 'pièce', referencePrice: '1000.00', active: true, version: 1 }],
+        productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const catAfter = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      expect(catAfter).not.toBeNull();
     });
   });
 });

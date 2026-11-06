@@ -232,8 +232,13 @@ export class CatalogConsumerService {
         } catch (err) {
           Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, seq ${event.seq} (CATEGORY) : erreur d'application (${(err as Error)?.message ?? err}).`);
         }
+      } else if (event.operation === 'ARCHIVE') {
+        try {
+          await this.archiveCategory(input.linkId, input.shopId, event);
+        } catch (err) {
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, seq ${event.seq} (CATEGORY ARCHIVE) : erreur (${(err as Error)?.message ?? err}).`);
+        }
       }
-      // ARCHIVE CATEGORY : curseur avancé (J10)
     }
 
     // PRODUCT
@@ -402,6 +407,37 @@ export class CatalogConsumerService {
     );
   }
 
+  // --- CATEGORY ARCHIVE (J10) -----------------------------------------------------------
+
+  /**
+   * Archive une catégorie GestStock (événement ARCHIVE/CATEGORY) :
+   * - Si la catégorie contient encore des produits GestStock visibles : conservée + avertissement.
+   * - Sinon : supprimée (soft-delete non applicable aux catégories, suppression directe).
+   */
+  private async archiveCategory(linkId: string, shopId: string, event: CatalogChangeEvent): Promise<void> {
+    const cat = await Category.findOne({
+      shopId,
+      'external.source': 'geststock',
+      'external.id': event.objectId,
+    }).lean();
+    if (!cat) return; // déjà absente ou jamais créée
+
+    const hasProducts = await Product.exists({
+      categoryId: cat._id,
+      shopId,
+      'external.source': 'geststock',
+      visibleInShop: { $ne: false },
+    });
+
+    if (hasProducts) {
+      Logger.warn(`Consommateur GestStock — liaison ${linkId} : ARCHIVE CATEGORY ${event.objectId} ignorée (contient des produits GestStock visibles).`);
+      return;
+    }
+
+    await Category.deleteOne({ _id: cat._id });
+    Logger.info(`Consommateur GestStock — liaison ${linkId} : catégorie ${event.objectId} supprimée (ARCHIVE).`);
+  }
+
   // --- PRODUCT_IMAGE (J9) ----------------------------------------------------------------
 
   /**
@@ -511,11 +547,13 @@ export class CatalogConsumerService {
           Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, image ${externalId} : stockage échoué (${(err as Error)?.message ?? err}).`);
         }
       }
+      // B5-D1 : ne pas écraser imageETag si l'ETag reçu est null (ETag faible rejeté par le client).
+      const etagUpdate = result.etag !== null ? { imageETag: result.etag } : {};
       await Product.updateOne(
         { shopId: input.shopId, 'external.source': 'geststock', 'external.id': externalId },
         {
           $set: {
-            imageETag: result.etag,
+            ...etagUpdate,
             ...(imageUrl ? { image: imageUrl } : {}),
           },
         }
@@ -693,6 +731,27 @@ export class CatalogConsumerService {
     );
     if (reconResult.modifiedCount > 0) {
       Logger.info(`Consommateur GestStock — liaison ${input.linkId} : réconciliation, ${reconResult.modifiedCount} produit(s) masqué(s).`);
+    }
+
+    // J10 : réconciliation des catégories — supprimer celles absentes de l'instantané
+    const orphanCats = await Category.find({
+      shopId: input.shopId,
+      'external.source': 'geststock',
+      'external.id': { $nin: Array.from(seenCategoryIds) },
+    }).lean();
+    for (const cat of orphanCats) {
+      const hasProducts = await Product.exists({
+        categoryId: cat._id,
+        shopId: input.shopId,
+        'external.source': 'geststock',
+        visibleInShop: { $ne: false },
+      });
+      if (hasProducts) {
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : réconciliation catégorie ${cat._id} absente du snapshot mais contient des produits GestStock visibles — conservée.`);
+      } else {
+        await Category.deleteOne({ _id: cat._id });
+        Logger.info(`Consommateur GestStock — liaison ${input.linkId} : réconciliation catégorie ${cat._id} supprimée (absente du snapshot).`);
+      }
     }
 
     // D3 : curseur posé à asOfSeq ; statut IDLE ; blocage effacé

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type mongoose from 'mongoose';
 
-import type { CatalogChangeEvent, CatalogChangePage, SnapshotPage } from '@/lib/geststock-client';
+import type { CatalogChangeEvent, CatalogChangePage, ProductImageResult, SnapshotPage } from '@/lib/geststock-client';
 import { GeststockClient, GeststockError, LinkCredentials } from '@/lib/geststock-client';
 import { Logger } from '@/lib/logger';
 import { normalizeName } from '@/lib/normalize';
@@ -23,7 +23,9 @@ import { GeststockLinkRepository } from '@/repositories/geststock-link.repositor
  * 5. Idempotence par version : `external.version < version reçue` pour tout upsert.
  * 6. ARCHIVE PRODUCT : masquage `inStock=false`, version-conditionné ; jamais de suppression.
  * 7. ARCHIVE CATEGORY : curseur avancé (J10).
- * 8. PRODUCT_IMAGE, CHANNEL_PRICE, AVAILABILITY, ONLINE_ORDER_STATUS : curseur avancé.
+ * 8. PRODUCT_IMAGE : empreinte SHA-256 (`imageSha256`) enregistrée sur le produit (version-conditionné) ;
+ *    curseur toujours avancé. Téléchargement différé dans `consumeImages()` (J9).
+ *    CHANNEL_PRICE, AVAILABILITY, ONLINE_ORDER_STATUS : curseur avancé.
  * 9. Type inconnu : BLOCKED/UNKNOWN_EVENT, curseur arrêté.
  * 10. `price` : posé seulement à la création ; `externalPrice` mis à jour à chaque version.
  * 11. Accusé de réception (`POST /catalog/changes/ack`) : après le dernier curseur sauvegardé ;
@@ -44,7 +46,7 @@ const LEASE_DURATION_MS = 30_000;
 const RETRY_DELAY_MS = 5 * 60_000;
 
 /** Types dont le curseur avance sans traitement (lots futurs ou déjà gérés ailleurs). */
-const SKIP_TYPES = new Set(['PRODUCT_IMAGE', 'CHANNEL_PRICE', 'AVAILABILITY', 'ONLINE_ORDER_STATUS']);
+const SKIP_TYPES = new Set(['CHANNEL_PRICE', 'AVAILABILITY', 'ONLINE_ORDER_STATUS']);
 
 /** Statuts terminaux : aucun appel GestStock (hors SNAPSHOT_REQUIRED géré par consumeSnapshot). */
 const TERMINAL_STATUSES = new Set(['CURSOR_AHEAD', 'PAUSED']);
@@ -62,10 +64,20 @@ export interface LinkRevoker {
   revoke(shopId: string, linkId: string, reason: string | null, revokedAt: Date): Promise<unknown>;
 }
 
+/**
+ * Stockage d'une image téléchargée depuis GestStock (lot 3, J9).
+ * L'implémentation de production upload sur Cloudinary ; les tests injectent un mock.
+ */
+export interface ProductImageStore {
+  /** Enregistre l'image JPEG et renvoie l'URL publique. */
+  upload(externalProductId: string, data: Buffer): Promise<string>;
+}
+
 export class CatalogConsumerService {
   constructor(
     private readonly client: GeststockClient,
     private readonly linkRevoker: LinkRevoker = new GeststockLinkRepository(),
+    private readonly imageStore?: ProductImageStore,
   ) {}
 
   /**
@@ -187,9 +199,10 @@ export class CatalogConsumerService {
 
   /** @returns `true` si la page a été appliquée entièrement, `false` si BLOCKED. */
   private async applyPage(input: ConsumeInput, page: CatalogChangePage, leaseOwner: string): Promise<boolean> {
-    const categories = page.items.filter((e) => e.type === 'CATEGORY');
-    const products   = page.items.filter((e) => e.type === 'PRODUCT');
-    const others     = page.items.filter((e) => e.type !== 'CATEGORY' && e.type !== 'PRODUCT');
+    const categories    = page.items.filter((e) => e.type === 'CATEGORY');
+    const products      = page.items.filter((e) => e.type === 'PRODUCT');
+    const productImages = page.items.filter((e) => e.type === 'PRODUCT_IMAGE');
+    const others        = page.items.filter((e) => e.type !== 'CATEGORY' && e.type !== 'PRODUCT' && e.type !== 'PRODUCT_IMAGE');
 
     // CATEGORY en premier (les PRODUCT en dépendent)
     for (const event of categories) {
@@ -223,6 +236,17 @@ export class CatalogConsumerService {
       }
     }
 
+    // PRODUCT_IMAGE : empreinte enregistrée version-conditionnée ; curseur toujours avancé
+    for (const event of productImages) {
+      if (event.operation === 'UPSERT' && event.data) {
+        try {
+          await this.applyProductImageState(input.shopId, event);
+        } catch (err) {
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, seq ${event.seq} (PRODUCT_IMAGE) : erreur (${(err as Error)?.message ?? err}).`);
+        }
+      }
+    }
+
     // Autres types
     for (const event of others) {
       if (!SKIP_TYPES.has(event.type)) {
@@ -232,7 +256,7 @@ export class CatalogConsumerService {
         });
         return false;
       }
-      // Type connu non traité ici (PRODUCT_IMAGE, CHANNEL_PRICE, etc.) : curseur avancé.
+      // Type connu non traité ici (CHANNEL_PRICE, etc.) : curseur avancé.
     }
 
     return true;
@@ -357,6 +381,127 @@ export class CatalogConsumerService {
     );
   }
 
+  // --- PRODUCT_IMAGE (J9) ----------------------------------------------------------------
+
+  /**
+   * Enregistre l'empreinte SHA-256 d'un événement `PRODUCT_IMAGE` sur le produit local,
+   * version-conditionné (`imageVersion < version reçue`). Le téléchargement effectif de
+   * l'image est délégué à `consumeImages()`.
+   *
+   * - `imageSha256 = null` : retrait d'image, champ effacé.
+   * - Idempotent : version identique ou plus ancienne ignorée.
+   */
+  private async applyProductImageState(shopId: string, event: CatalogChangeEvent): Promise<void> {
+    const data = event.data as { productId?: unknown; imageSha256?: unknown; version?: unknown };
+    const externalId = typeof data.productId === 'string' ? data.productId : event.objectId;
+    const imageSha256 = typeof data.imageSha256 === 'string' ? data.imageSha256 : null;
+    const version = typeof data.version === 'number' ? data.version : event.version;
+
+    await Product.updateOne(
+      {
+        shopId,
+        'external.source': 'geststock',
+        'external.id': externalId,
+        $or: [
+          { imageVersion: null },
+          { imageVersion: { $exists: false } },
+          { imageVersion: { $lt: version } },
+        ],
+      },
+      {
+        $set: { imageSha256, imageVersion: version },
+        // Effacer l'ETag si l'empreinte change (forcer le téléchargement au prochain consumeImages)
+        ...(imageSha256 === null ? { $unset: { imageETag: '' } } : {}),
+      }
+    );
+  }
+
+  // --- Téléchargement des images (J9) ---------------------------------------------------
+
+  /**
+   * Télécharge les images des produits GestStock dont l'empreinte a changé depuis la dernière
+   * synchronisation (`imageSha256` présent, `imageETag` absent ou différent de `imageSha256`).
+   *
+   * Chaque image est téléchargée via `GET /catalog/products/{id}/image` (G19) :
+   * - `If-None-Match` envoyé avec l'ETag détenu (G19-D9) → `304` : rien à faire.
+   * - `200` : image JPEG stockée via `imageStore`, ETag reçu enregistré.
+   * - `404` : pas d'image, `imageSha256` et `imageETag` effacés.
+   * - `429` : `imageNextAttemptAt` posé, arrêt du cycle d'images.
+   * - Erreur transitoire : arrêt silencieux, réessai au prochain cycle.
+   *
+   * Ne partage pas le bail du consommateur de flux : appelé dans un cycle séparé.
+   * Sans `imageStore` injecté, les octets sont ignorés (empreinte et ETag quand même enregistrés).
+   */
+  async consumeImages(input: ConsumeInput): Promise<void> {
+    // Backoff images actif ?
+    const state = await SyncState.findOne({ linkId: input.linkId }).lean();
+    if (!state) return;
+    if (state.imageNextAttemptAt && state.imageNextAttemptAt > new Date()) return;
+
+    // Produits GestStock dont l'empreinte est connue mais l'ETag ne correspond pas
+    const products = await Product.find({
+      shopId: input.shopId,
+      'external.source': 'geststock',
+      imageSha256: { $ne: null, $exists: true },
+    }).select('external.id imageSha256 imageETag').lean();
+
+    for (const prod of products) {
+      const externalId = prod.external?.id;
+      if (!externalId) continue;
+      const knownSha = prod.imageSha256 as string | null;
+      const knownETag = prod.imageETag as string | null;
+
+      // ETag identique à l'empreinte connue → déjà à jour
+      if (knownSha && knownETag === knownSha) continue;
+
+      let result: ProductImageResult;
+      try {
+        result = await this.client.getCatalogProductImage(input.credentials, externalId, knownETag);
+      } catch (err) {
+        if (err instanceof GeststockError && err.kind === 'RATE_LIMITED') {
+          const delay = (err.details.retryAfterSeconds ?? 60) * 1000;
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : 429 (images), réessai différé.`);
+          await SyncState.updateOne({ linkId: input.linkId }, {
+            $set: { imageNextAttemptAt: new Date(Date.now() + delay) },
+          });
+          return;
+        }
+        // Erreur transitoire ou LINK_REVOKED : arrêt silencieux, réessai au prochain cycle
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, image ${externalId} : erreur (${(err as Error)?.message ?? err}).`);
+        return;
+      }
+
+      if (result.kind === 'not_modified') continue;
+
+      if (result.kind === 'not_found') {
+        await Product.updateOne(
+          { shopId: input.shopId, 'external.source': 'geststock', 'external.id': externalId },
+          { $set: { imageSha256: null, imageVersion: null, imageETag: null } }
+        );
+        continue;
+      }
+
+      // result.kind === 'image'
+      let imageUrl: string | undefined;
+      if (this.imageStore) {
+        try {
+          imageUrl = await this.imageStore.upload(externalId, result.data);
+        } catch (err) {
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, image ${externalId} : stockage échoué (${(err as Error)?.message ?? err}).`);
+        }
+      }
+      await Product.updateOne(
+        { shopId: input.shopId, 'external.source': 'geststock', 'external.id': externalId },
+        {
+          $set: {
+            imageETag: result.etag,
+            ...(imageUrl ? { image: imageUrl } : {}),
+          },
+        }
+      );
+    }
+  }
+
   // --- Gestion des erreurs de l'appel GestStock ------------------------------------------
 
   private async handleFetchError(input: ConsumeInput, err: unknown, leaseOwner: string): Promise<void> {
@@ -471,6 +616,18 @@ export class CatalogConsumerService {
         const result = await this.applyProductUpsert(input.shopId, snapshotItemToEvent('PRODUCT', item));
         if (result === 'MISSING_CATEGORY') {
           Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, instantané PRODUCT ${id} : catégorie externe introuvable, ignoré (J11).`);
+        }
+      }
+
+      // État des images (J9) : empreinte SHA-256 enregistrée version-conditionnée
+      for (const item of page.productImages) {
+        const imageEvent = snapshotItemToEvent('PRODUCT_IMAGE', item);
+        // Dans l'instantané, objectId = productId (ProductImageState.productId)
+        if (typeof item.productId === 'string') imageEvent.objectId = item.productId;
+        try {
+          await this.applyProductImageState(input.shopId, imageEvent);
+        } catch (err) {
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, instantané PRODUCT_IMAGE ${imageEvent.objectId} : erreur (${(err as Error)?.message ?? err}).`);
         }
       }
 

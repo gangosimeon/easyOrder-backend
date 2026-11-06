@@ -8,6 +8,7 @@ import mongoose, { Document, Model, Schema } from 'mongoose';
  * - **leaseOwner / leaseUntil** : bail d'exclusion ; un seul consommateur à la fois par liaison.
  * - **blockedReason / blockedEventSeq** : cause et position du blocage (statut BLOCKED).
  * - **nextAttemptAt** : backoff sur erreur transitoire (429, 503, réseau).
+ * - **imageNextAttemptAt** : backoff sur erreur 429 lors du téléchargement d'images (lot 3, J9).
  *
  * Statuts :
  *   IDLE             — au repos, prêt pour le prochain cycle.
@@ -33,6 +34,8 @@ export interface ISyncState extends Document {
   blockedReason?: BlockedReason | null;
   blockedEventSeq?: number | null;
   nextAttemptAt?: Date | null;
+  /** Backoff spécifique aux téléchargements d'images (lot 3, J9) ; distinct de `nextAttemptAt`. */
+  imageNextAttemptAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,7 +50,8 @@ const syncStateSchema = new Schema<ISyncState>(
     leaseUntil:      { type: Date, default: null },
     blockedReason:   { type: String, enum: ['MISSING_CATEGORY', 'UNKNOWN_EVENT'], default: null },
     blockedEventSeq: { type: Number, default: null, min: 0 },
-    nextAttemptAt:   { type: Date, default: null },
+    nextAttemptAt:      { type: Date, default: null },
+    imageNextAttemptAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

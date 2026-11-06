@@ -23,6 +23,12 @@ export interface IProduct extends Document {
   external?: IExternalRef;
   /** Prix de référence GestStock (lot 3, J7b) ; jamais écrit par l'API boutique. */
   externalPrice?: number;
+  /** Empreinte SHA-256 de l'image GestStock (lot 3, J9) : posée par les événements PRODUCT_IMAGE et l'instantané. */
+  imageSha256?: string | null;
+  /** Génération de l'image GestStock (lot 3, J9) : idempotence des événements PRODUCT_IMAGE. */
+  imageVersion?: number | null;
+  /** ETag reçu lors du dernier téléchargement réussi (lot 3, J9) : envoyé en If-None-Match. */
+  imageETag?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,6 +57,9 @@ const productSchema = new Schema<IProduct>(
     inStock:       { type: Boolean, default: true },
     external:      { type: externalRefSchema },
     externalPrice: { type: Number, min: 0 },
+    imageSha256:   { type: String, default: null },
+    imageVersion:  { type: Number, min: 0, default: null },
+    imageETag:     { type: String, default: null },
   },
   { timestamps: true }
 );

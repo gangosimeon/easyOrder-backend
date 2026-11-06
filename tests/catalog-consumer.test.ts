@@ -805,4 +805,235 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       expect((await SyncState.findOne({ linkId }).lean())?.status).toBe('PAUSED');
     });
   });
+
+  // --- Images par empreinte (J9) -------------------------------------------------------
+
+  describe('Images par empreinte (lot 3, J9)', () => {
+    /** Client minimal pour consumeImages */
+    function makeImageClient(result: import('@/lib/geststock-client').ProductImageResult) {
+      return {
+        getCatalogChanges:    vi.fn(async () => { throw new Error('ne doit pas être appelé'); }),
+        acknowledgeChanges:   vi.fn(),
+        getSnapshot:          vi.fn(async () => { throw new Error('ne doit pas être appelé'); }),
+        getCatalogProductImage: vi.fn(async () => result),
+      } as unknown as GeststockClient;
+    }
+
+    it('événement PRODUCT_IMAGE UPSERT → imageSha256 et imageVersion enregistrés sur le produit', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-img-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-img-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatImg', normalizedName: 'catimg',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Produit', price: 1000,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      const sha = 'a'.repeat(64);
+      const { service } = makeService([{
+        items: [{
+          seq: 1, type: 'PRODUCT_IMAGE', objectId: prodId, version: 2,
+          operation: 'UPSERT', occurredAt: '2026-01-01T12:00:00Z',
+          data: { productId: prodId, imageSha256: sha, version: 2 },
+        }],
+        hasMore: false, lastSeq: 1,
+      }]);
+      await service.consume(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.imageSha256).toBe(sha);
+      expect(prod?.imageVersion).toBe(2);
+    });
+
+    it('événement PRODUCT_IMAGE version plus ancienne → empreinte non écrasée', async () => {
+      const shopId = await createShopId();
+      const { input } = makeTest();
+      const catId  = 'cat-img2-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-img2-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatImg2', normalizedName: 'catimg2',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      const shaOld = 'b'.repeat(64);
+      const shaNew = 'c'.repeat(64);
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Produit', price: 1000,
+        imageSha256: shaNew, imageVersion: 5,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      const { service } = makeService([{
+        items: [{
+          seq: 1, type: 'PRODUCT_IMAGE', objectId: prodId, version: 3,
+          operation: 'UPSERT', occurredAt: '2026-01-01T12:00:00Z',
+          data: { productId: prodId, imageSha256: shaOld, version: 3 },
+        }],
+        hasMore: false, lastSeq: 1,
+      }]);
+      await service.consume(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.imageSha256).toBe(shaNew);
+      expect(prod?.imageVersion).toBe(5);
+    });
+
+    it('événement PRODUCT_IMAGE UPSERT imageSha256=null → retrait d\'image', async () => {
+      const shopId = await createShopId();
+      const { input } = makeTest();
+      const catId  = 'cat-img3-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-img3-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatImg3', normalizedName: 'catimg3',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Produit', price: 1000,
+        imageSha256: 'd'.repeat(64), imageVersion: 1, imageETag: 'd'.repeat(64),
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      const { service } = makeService([{
+        items: [{
+          seq: 1, type: 'PRODUCT_IMAGE', objectId: prodId, version: 2,
+          operation: 'UPSERT', occurredAt: '2026-01-01T12:00:00Z',
+          data: { productId: prodId, imageSha256: null, version: 2 },
+        }],
+        hasMore: false, lastSeq: 1,
+      }]);
+      await service.consume(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.imageSha256).toBeNull();
+    });
+
+    it('instantané : productImages → imageSha256 et imageVersion enregistrés', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-snap-img-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-snap-img-' + new mongoose.Types.ObjectId().toString();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const sha = 'e'.repeat(64);
+      const { service } = makeSnapshotService([{
+        asOfSeq: 10, currency: 'XOF',
+        categories: [{ id: catId, name: 'CatSnapImg', description: '', version: 1 }],
+        products: [{ id: prodId, name: 'Prod', description: '', categoryId: catId, referencePrice: '1000', unit: 'pièce', version: 1 }],
+        productImages: [{ productId: prodId, imageSha256: sha, version: 1 }],
+        nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.imageSha256).toBe(sha);
+      expect(prod?.imageVersion).toBe(1);
+    });
+
+    it('consumeImages : empreinte nouvelle → getCatalogProductImage appelé, imageETag enregistré', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-dl-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-dl-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatDl', normalizedName: 'catdl',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      const sha = 'f'.repeat(64);
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Prod', price: 1000,
+        imageSha256: sha, imageVersion: 1,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      await SyncState.create({ linkId, after: 10, acknowledgedSeq: 10, status: 'IDLE' });
+      const mockFetch = vi.fn(async () => ({ kind: 'image' as const, data: Buffer.from('jpeg'), etag: sha }));
+      const client = makeImageClient({ kind: 'image', data: Buffer.from('jpeg'), etag: sha });
+      (client as unknown as { getCatalogProductImage: typeof mockFetch }).getCatalogProductImage = mockFetch;
+      const service = new CatalogConsumerService(client);
+      await service.consumeImages(input(shopId));
+      expect(mockFetch).toHaveBeenCalledWith(expect.anything(), prodId, null);
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.imageETag).toBe(sha);
+    });
+
+    it('consumeImages : ETag identique à imageSha256 → aucun appel GestStock', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-cached-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-cached-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatCached', normalizedName: 'catcached',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      const sha = '0'.repeat(64);
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Prod', price: 1000,
+        imageSha256: sha, imageVersion: 1, imageETag: sha,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      await SyncState.create({ linkId, after: 10, acknowledgedSeq: 10, status: 'IDLE' });
+      const mockFetch = vi.fn();
+      const client = { getCatalogProductImage: mockFetch } as unknown as GeststockClient;
+      const service = new CatalogConsumerService(client);
+      await service.consumeImages(input(shopId));
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('consumeImages : 304 not_modified → imageETag inchangé', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-304-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-304-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'Cat304', normalizedName: 'cat304',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      const sha = '1'.repeat(64);
+      const oldEtag = '2'.repeat(64);
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Prod', price: 1000,
+        imageSha256: sha, imageVersion: 2, imageETag: oldEtag,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      await SyncState.create({ linkId, after: 10, acknowledgedSeq: 10, status: 'IDLE' });
+      const client = makeImageClient({ kind: 'not_modified' });
+      const service = new CatalogConsumerService(client);
+      await service.consumeImages(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.imageETag).toBe(oldEtag);
+    });
+
+    it('consumeImages : 404 not_found → imageSha256 et imageETag effacés', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-nf-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-nf-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'CatNf', normalizedName: 'catnf',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      const sha = '3'.repeat(64);
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Prod', price: 1000,
+        imageSha256: sha, imageVersion: 1,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      await SyncState.create({ linkId, after: 10, acknowledgedSeq: 10, status: 'IDLE' });
+      const client = makeImageClient({ kind: 'not_found' });
+      const service = new CatalogConsumerService(client);
+      await service.consumeImages(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.imageSha256).toBeNull();
+      expect(prod?.imageETag).toBeNull();
+    });
+
+    it('consumeImages : 429 → imageNextAttemptAt posé, arrêt immédiat', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId  = 'cat-429-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-429-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({ shopId, name: 'Cat429', normalizedName: 'cat429',
+        external: { source: 'geststock', id: catId, version: 1 } });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      await Product.create({ shopId, categoryId: jcmbCat!._id, name: 'Prod', price: 1000,
+        imageSha256: '4'.repeat(64), imageVersion: 1,
+        external: { source: 'geststock', id: prodId, version: 1 } });
+      await SyncState.create({ linkId, after: 10, acknowledgedSeq: 10, status: 'IDLE' });
+      const { GeststockError } = await import('@/lib/geststock-client');
+      const client = {
+        getCatalogProductImage: vi.fn(async () => { throw new GeststockError('RATE_LIMITED', { retryAfterSeconds: 60 }); }),
+      } as unknown as GeststockClient;
+      const before = Date.now();
+      const service = new CatalogConsumerService(client);
+      await service.consumeImages(input(shopId));
+      const state = await SyncState.findOne({ linkId }).lean();
+      expect(state?.imageNextAttemptAt).toBeInstanceOf(Date);
+      expect(state?.imageNextAttemptAt!.getTime()).toBeGreaterThanOrEqual(before + 60_000);
+    });
+
+    it('consumeImages : backoff actif → aucun appel GestStock', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'IDLE',
+        imageNextAttemptAt: new Date(Date.now() + 10 * 60_000) });
+      const mockFetch = vi.fn();
+      const client = { getCatalogProductImage: mockFetch } as unknown as GeststockClient;
+      const service = new CatalogConsumerService(client);
+      await service.consumeImages(input(shopId));
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
 });

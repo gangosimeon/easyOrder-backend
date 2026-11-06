@@ -161,6 +161,17 @@ export interface LinkCredentials {
   secret: () => Promise<string> | string;
 }
 
+/**
+ * Résultat du téléchargement de l'image principale d'un produit (`GET /catalog/products/{id}/image`, G19).
+ * - `image`        : image JPEG téléchargée ; `etag` = empreinte SHA-256 reçue (sans guillemets).
+ * - `not_modified` : `If-None-Match` correspondait ; l'image locale est à jour.
+ * - `not_found`    : produit inexistant, d'une autre entreprise ou sans image (G19-D3).
+ */
+export type ProductImageResult =
+  | { kind: 'image'; data: Buffer; etag: string }
+  | { kind: 'not_modified' }
+  | { kind: 'not_found' };
+
 /** Événement servi dans une page du flux (`ChangeEventBase`). */
 export interface CatalogChangeEvent {
   seq: number;
@@ -472,6 +483,51 @@ export class GeststockClient {
     return { acknowledgedSeq: body.acknowledgedSeq };
   }
 
+  /**
+   * Image principale d'un produit lié (`GET /catalog/products/{productId}/image`, portée `catalog:read`, G19).
+   *
+   * - Envoie `If-None-Match: "etag"` si `etag` est fourni ; `304` ⇒ `{ kind: 'not_modified' }`.
+   * - `200` : image JPEG binaire + `ETag` fort (SHA-256) ⇒ `{ kind: 'image', data, etag }`.
+   * - `404 PRODUCT_IMAGE_NOT_FOUND` : produit inexistant, autre entreprise ou sans image ⇒ `{ kind: 'not_found' }`.
+   * - Le client enregistre l'`ETag` **reçu**, pas l'empreinte de l'événement (G19-D9).
+   *
+   * @throws {@link GeststockError} `RATE_LIMITED` (429 ; `retryAfterSeconds` rendu).
+   */
+  async getCatalogProductImage(
+    credentials: LinkCredentials,
+    productId: string,
+    etag?: string | null,
+  ): Promise<ProductImageResult> {
+    const extraHeaders: Record<string, string> = { accept: 'image/jpeg, application/problem+json' };
+    if (etag) extraHeaders['if-none-match'] = `"${etag}"`;
+
+    const path = `/catalog/products/${productId}/image`;
+    const config = clientConfig();
+    const makeInit = (token: string): RequestInit => ({
+      method: 'GET',
+      headers: { ...bearer(token), ...extraHeaders },
+    });
+
+    let result = await this.callImage(config, path, makeInit(await this.getLinkAccessToken(credentials)));
+    if (result.status === 401 && errorCode(result.body) === 'INVALID_TOKEN') {
+      this.invalidateLinkToken(credentials.linkId);
+      result = await this.callImage(config, path, makeInit(await this.getLinkAccessToken(credentials)));
+    }
+    if (result.status === 401) this.invalidateLinkToken(credentials.linkId);
+
+    if (result.status === 304) return { kind: 'not_modified' };
+    if (result.status === 200 && result.binary) {
+      const rawEtag = result.headers.get('etag') ?? '';
+      const receivedEtag = rawEtag.replace(/^W\/"?/, '').replace(/^"(.*)"$/, '$1');
+      return { kind: 'image', data: result.binary, etag: receivedEtag };
+    }
+    if (result.status === 404 && errorCode(result.body) === 'PRODUCT_IMAGE_NOT_FOUND') {
+      return { kind: 'not_found' };
+    }
+    const httpResult: HttpResult = { status: result.status, headers: result.headers, body: result.body };
+    throw linkFailure(httpResult, credentials.linkId, this);
+  }
+
   /** Appel avec le jeton de la liaison ; un 401 INVALID_TOKEN l'invalide et l'appel est refait une seule fois. */
   private async withLinkToken(credentials: LinkCredentials, init: (token: string) => RequestInit, path: string): Promise<HttpResult> {
     const config = clientConfig();
@@ -485,6 +541,55 @@ export class GeststockClient {
   }
 
   // --- Transport -----------------------------------------------------------------------------------------
+
+  /**
+   * Appel HTTP spécialisé pour les réponses binaires (images JPEG).
+   * Distinct de `call` : ne force pas `accept: application/json`, lit le corps en ArrayBuffer si
+   * `Content-Type: image/jpeg`, retourne `binary` pour un 200 et n'applique pas la contrainte JSON.
+   */
+  private async callImage(
+    config: ClientConfig,
+    path: string,
+    init: RequestInit,
+  ): Promise<{ status: number; headers: Headers; binary?: Buffer; body?: unknown }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${config.apiBase}${path}`, {
+        ...init,
+        redirect: 'manual',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      const aborted = controller.signal.aborted || (error as { name?: string })?.name === 'AbortError';
+      Logger.warn(`Appel GestStock ${path} : ${aborted ? 'délai dépassé' : 'injoignable'}.`);
+      throw new GeststockError(aborted ? 'TIMEOUT' : 'NETWORK');
+    }
+    try {
+      if ((response.status >= 300 && response.status < 400) || response.type === 'opaqueredirect') {
+        Logger.warn(`Appel GestStock ${path} : redirection refusée (${response.status}).`);
+        throw new GeststockError('REDIRECT', { status: response.status });
+      }
+      if (response.status === 304) {
+        return { status: 304, headers: response.headers };
+      }
+      const contentType = response.headers.get('content-type') ?? '';
+      if (/^image\/jpeg\b/i.test(contentType) && response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        return { status: response.status, headers: response.headers, binary: Buffer.from(arrayBuffer) };
+      }
+      let body: unknown;
+      if (/^application\/(?:problem\+)?json\b/i.test(contentType)) {
+        try { body = await response.json(); } catch {}
+      }
+      return { status: response.status, headers: response.headers, body };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   /** Un appel : délai, redirection refusée, corps JSON lu si annoncé. */
   private async call(config: ClientConfig, path: string, init: RequestInit): Promise<HttpResult> {

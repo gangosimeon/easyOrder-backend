@@ -388,6 +388,32 @@ export class GeststockClient {
     };
   }
 
+  /**
+   * Accusé de réception du curseur (`POST /catalog/changes/ack`, portée `catalog:read`).
+   * Informe GestStock que tous les événements jusqu'au seq `seq` ont été appliqués ; GestStock
+   * peut alors purger les événements antérieurs.
+   *
+   * @throws {@link GeststockError} `CURSOR_AHEAD` (409) si `seq` dépasse le dernier seq attribué.
+   */
+  async acknowledgeChanges(credentials: LinkCredentials, seq: number): Promise<{ acknowledgedSeq: number }> {
+    const result = await this.withLinkToken(
+      credentials,
+      (token) => ({
+        method: 'POST',
+        headers: { ...bearer(token), 'content-type': 'application/json' },
+        body: JSON.stringify({ seq }),
+      }),
+      '/catalog/changes/ack'
+    );
+    if (result.status === 409 && errorCode(result.body) === 'CURSOR_AHEAD') {
+      throw new GeststockError('CURSOR_AHEAD', { status: 409 });
+    }
+    if (result.status !== 200) throw linkFailure(result, credentials.linkId, this);
+    const body = result.body as { acknowledgedSeq?: unknown } | undefined;
+    if (typeof body?.acknowledgedSeq !== 'number') throw protocol('POST /catalog/changes/ack');
+    return { acknowledgedSeq: body.acknowledgedSeq };
+  }
+
   /** Appel avec le jeton de la liaison ; un 401 INVALID_TOKEN l'invalide et l'appel est refait une seule fois. */
   private async withLinkToken(credentials: LinkCredentials, init: (token: string) => RequestInit, path: string): Promise<HttpResult> {
     const config = clientConfig();

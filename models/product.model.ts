@@ -21,6 +21,8 @@ export interface IProduct extends Document {
   inStock: boolean;
   /** Posé par la synchronisation GestStock ; absent sur les produits boutique purs. */
   external?: IExternalRef;
+  /** Prix de référence GestStock (lot 3, J7b) ; jamais écrit par l'API boutique. */
+  externalPrice?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,6 +50,7 @@ const productSchema = new Schema<IProduct>(
     stock:         { type: Number, default: 0, min: 0 },
     inStock:       { type: Boolean, default: true },
     external:      { type: externalRefSchema },
+    externalPrice: { type: Number, min: 0 },
   },
   { timestamps: true }
 );

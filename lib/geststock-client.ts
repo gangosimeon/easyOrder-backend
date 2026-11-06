@@ -77,7 +77,11 @@ export type GeststockErrorKind =
   /** Réponse inattendue : non JSON, mal formée, statut de liaison non pris en charge. */
   | 'PROTOCOL'
   /** Autre refus (400 invalid_request, 403, 404…) : `status` et `code` rendus. */
-  | 'REJECTED';
+  | 'REJECTED'
+  /** 409 CURSOR_AHEAD : `after` dépasse le dernier seq attribué ; arrêt de la synchronisation. */
+  | 'CURSOR_AHEAD'
+  /** 410 CURSOR_EXPIRED : `after` est sous le repère de purge ; reprise depuis l'instantané. */
+  | 'CURSOR_EXPIRED';
 
 const MESSAGES: Record<GeststockErrorKind, string> = {
   INVALID_CLIENT: 'GestStock refuse les identifiants du client JeCréeMaBoutique (configuration).',
@@ -91,6 +95,8 @@ const MESSAGES: Record<GeststockErrorKind, string> = {
   NETWORK: 'GestStock est injoignable.',
   PROTOCOL: 'Réponse inattendue de GestStock.',
   REJECTED: 'GestStock a refusé la requête.',
+  CURSOR_AHEAD: 'Curseur en avance sur le flux GestStock : réinitialisation requise.',
+  CURSOR_EXPIRED: "Curseur GestStock expiré : reprise depuis l'instantané.",
 };
 
 /** Erreur typée du client GestStock : message fixe, aucune valeur sensible. */
@@ -150,6 +156,27 @@ export interface LinkCredentials {
   linkId: string;
   /** Secret de liaison, lu seulement si un nouveau jeton est nécessaire (déchiffrement J2). */
   secret: () => Promise<string> | string;
+}
+
+/** Événement servi dans une page du flux (`ChangeEventBase`). */
+export interface CatalogChangeEvent {
+  seq: number;
+  type: string;
+  objectId: string;
+  version: number;
+  operation: 'UPSERT' | 'ARCHIVE';
+  occurredAt: string;
+  /** Absent pour les événements ARCHIVE. */
+  data?: Record<string, unknown>;
+}
+
+/** Page de résultats de `GET /catalog/changes`. */
+export interface CatalogChangePage {
+  items: CatalogChangeEvent[];
+  /** `true` : rappeler immédiatement avec `after = lastSeq`. */
+  hasMore: boolean;
+  /** Dernier seq examiné (y compris les événements filtrés) : à enregistrer comme nouvel `after`. */
+  lastSeq: number;
 }
 
 export interface GeststockClientOptions {
@@ -329,6 +356,36 @@ export class GeststockClient {
     if (result.status !== 200) throw linkFailure(result, credentials.linkId, this);
     this.invalidateLinkToken(credentials.linkId);
     return { link: remoteLink(result.body, 'POST /link/revoke'), alreadyRevoked: false };
+  }
+
+  // --- Flux de catalogue ---------------------------------------------------------------------------------
+
+  /**
+   * Page du flux de catalogue (`GET /catalog/changes?after=<after>`, portée `catalog:read`).
+   *
+   * @throws {@link GeststockError} `CURSOR_AHEAD` (409) : curseur en avance, arrêt requis.
+   * @throws {@link GeststockError} `CURSOR_EXPIRED` (410) : curseur expiré, reprise depuis l'instantané.
+   */
+  async getCatalogChanges(credentials: LinkCredentials, after: number, limit?: number): Promise<CatalogChangePage> {
+    const params = new URLSearchParams({ after: String(after) });
+    if (limit !== undefined) params.set('limit', String(limit));
+    const result = await this.withLinkToken(credentials, (token) => ({ method: 'GET', headers: bearer(token) }), `/catalog/changes?${params}`);
+    if (result.status === 409 && errorCode(result.body) === 'CURSOR_AHEAD') {
+      throw new GeststockError('CURSOR_AHEAD', { status: 409 });
+    }
+    if (result.status === 410 && errorCode(result.body) === 'CURSOR_EXPIRED') {
+      throw new GeststockError('CURSOR_EXPIRED', { status: 410 });
+    }
+    if (result.status !== 200) throw linkFailure(result, credentials.linkId, this);
+    const page = result.body as { items?: unknown; hasMore?: unknown; lastSeq?: unknown } | undefined;
+    if (!Array.isArray(page?.items) || typeof page?.hasMore !== 'boolean' || typeof page?.lastSeq !== 'number') {
+      throw protocol('GET /catalog/changes');
+    }
+    return {
+      items: page.items as CatalogChangeEvent[],
+      hasMore: page.hasMore,
+      lastSeq: page.lastSeq,
+    };
   }
 
   /** Appel avec le jeton de la liaison ; un 401 INVALID_TOKEN l'invalide et l'appel est refait une seule fois. */

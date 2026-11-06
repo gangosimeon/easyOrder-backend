@@ -6,7 +6,7 @@ import Category from '@/models/category.model';
 import Product from '@/models/product.model';
 import SyncState from '@/models/syncstate.model';
 import { CatalogConsumerService, type ConsumeInput, type LinkRevoker } from '@/services/catalog-consumer.service';
-import type { CatalogChangePage, GeststockClient } from '@/lib/geststock-client';
+import type { CatalogChangePage, SnapshotPage, GeststockClient } from '@/lib/geststock-client';
 
 /**
  * Consommateur du flux de catalogue GestStock (lot 3, J7b) :
@@ -14,7 +14,7 @@ import type { CatalogChangePage, GeststockClient } from '@/lib/geststock-client'
  * types non pris en charge, accusé de réception, statuts d'erreur.
  */
 
-/** Crée un service avec un client GestStock simulé. */
+/** Crée un service avec un client GestStock simulé (flux de modifications). */
 function makeService(pages: CatalogChangePage[], linkRevoker?: LinkRevoker) {
   let callCount = 0;
   const mockGetChanges = vi.fn(async () => {
@@ -24,8 +24,24 @@ function makeService(pages: CatalogChangePage[], linkRevoker?: LinkRevoker) {
   const client = {
     getCatalogChanges: mockGetChanges,
     acknowledgeChanges: mockAck,
+    getSnapshot: vi.fn(async () => ({ asOfSeq: 0, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null })),
   } as unknown as GeststockClient;
   return { service: new CatalogConsumerService(client, linkRevoker), mockGetChanges, mockAck };
+}
+
+/** Crée un service avec un client GestStock simulé (instantané). */
+function makeSnapshotService(pages: SnapshotPage[], linkRevoker?: LinkRevoker) {
+  let callCount = 0;
+  const mockGetSnapshot = vi.fn(async () => {
+    return pages[callCount++] ?? { asOfSeq: 0, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null };
+  });
+  const mockAck = vi.fn(async (_creds: unknown, seq: number) => ({ acknowledgedSeq: seq }));
+  const client = {
+    getCatalogChanges: vi.fn(async () => { throw new Error('getCatalogChanges ne doit pas être appelé'); }),
+    acknowledgeChanges: mockAck,
+    getSnapshot: mockGetSnapshot,
+  } as unknown as GeststockClient;
+  return { service: new CatalogConsumerService(client, linkRevoker), mockGetSnapshot, mockAck };
 }
 
 /** linkId et input uniques par test pour éviter toute interférence entre états. */
@@ -607,6 +623,186 @@ describe('CatalogConsumerService (lot 3, J7b)', () => {
       const state = await SyncState.findOne({ linkId }).lean();
       expect(state?.nextAttemptAt).toBeInstanceOf(Date);
       expect(state?.status).toBe('IDLE');
+    });
+  });
+
+  // --- Instantané complet (J8) -------------------------------------------------------
+
+  describe('Instantané (lot 3, J8)', () => {
+    it('statut SNAPSHOT_REQUIRED → appelle getSnapshot, pas getCatalogChanges', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service, mockGetSnapshot } = makeSnapshotService([
+        { asOfSeq: 10, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null },
+      ]);
+      await service.consume(input(shopId));
+      expect(mockGetSnapshot).toHaveBeenCalled();
+    });
+
+    it('crée la catégorie depuis l\'instantané', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-snap-' + new mongoose.Types.ObjectId().toString();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 5, currency: 'XOF',
+        categories: [{ id: catId, name: 'Électronique', description: 'Appareils', active: true, version: 1 }],
+        products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const cat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      expect(cat?.name).toBe('Électronique');
+      expect(cat?.external?.source).toBe('geststock');
+    });
+
+    it('crée le produit depuis l\'instantané (catégorie présente dans la page)', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-snap-p-' + new mongoose.Types.ObjectId().toString();
+      const prodId = 'prod-snap-' + new mongoose.Types.ObjectId().toString();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 8, currency: 'XOF',
+        categories: [{ id: catId, name: 'Accessoires', description: '', active: true, version: 1 }],
+        products: [{ id: prodId, name: 'Casque BT', description: '', categoryId: catId, referencePrice: '15000', unit: 'pièce', version: 1 }],
+        productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const prod = await Product.findOne({ shopId, 'external.id': prodId }).lean();
+      expect(prod?.name).toBe('Casque BT');
+      expect(prod?.externalPrice).toBe(15000);
+      expect(prod?.external?.source).toBe('geststock');
+    });
+
+    it('instantané multi-page : catégories des deux pages présentes', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId1 = 'cat-p1-' + new mongoose.Types.ObjectId().toString();
+      const catId2 = 'cat-p2-' + new mongoose.Types.ObjectId().toString();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const page1: SnapshotPage = {
+        asOfSeq: 20, currency: 'XOF',
+        categories: [{ id: catId1, name: 'Page1Cat', description: '', version: 1 }],
+        products: [], productImages: [], nextPageToken: 'token-page-2',
+      };
+      const page2: SnapshotPage = {
+        asOfSeq: 20, currency: 'XOF',
+        categories: [{ id: catId2, name: 'Page2Cat', description: '', version: 1 }],
+        products: [], productImages: [], nextPageToken: null,
+      };
+      const { service, mockGetSnapshot } = makeSnapshotService([page1, page2]);
+      await service.consume(input(shopId));
+      expect(mockGetSnapshot).toHaveBeenCalledTimes(2);
+      expect(await Category.findOne({ shopId, 'external.id': catId1 }).lean()).not.toBeNull();
+      expect(await Category.findOne({ shopId, 'external.id': catId2 }).lean()).not.toBeNull();
+    });
+
+    it('réconciliation : produit absent de l\'instantané → inStock=false', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      const catId = 'cat-recon-' + new mongoose.Types.ObjectId().toString();
+      const prodIdKept  = 'prod-kept-' + new mongoose.Types.ObjectId().toString();
+      const prodIdGone  = 'prod-gone-' + new mongoose.Types.ObjectId().toString();
+      await Category.create({
+        shopId, name: 'CatRecon', normalizedName: 'catrecon',
+        external: { source: 'geststock', id: catId, version: 1 },
+      });
+      const jcmbCat = await Category.findOne({ shopId, 'external.id': catId }).lean();
+      await Product.create({
+        shopId, name: 'Produit disparu', normalizedName: 'produit-disparu',
+        categoryId: jcmbCat!._id, price: 5000, externalPrice: 5000, inStock: true,
+        external: { source: 'geststock', id: prodIdGone, version: 1 },
+      });
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service } = makeSnapshotService([{
+        asOfSeq: 15, currency: 'XOF',
+        categories: [{ id: catId, name: 'CatRecon', description: '', version: 1 }],
+        products: [{ id: prodIdKept, name: 'Produit gardé', description: '', categoryId: catId, referencePrice: '3000', unit: 'pièce', version: 1 }],
+        productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const gone = await Product.findOne({ shopId, 'external.id': prodIdGone }).lean();
+      expect(gone?.inStock).toBe(false);
+    });
+
+    it('après instantané : statut IDLE, after=asOfSeq, accusé de réception envoyé', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { service, mockAck } = makeSnapshotService([{
+        asOfSeq: 42, currency: 'XOF', categories: [], products: [], productImages: [], nextPageToken: null,
+      }]);
+      await service.consume(input(shopId));
+      const state = await SyncState.findOne({ linkId }).lean();
+      expect(state?.status).toBe('IDLE');
+      expect(state?.after).toBe(42);
+      expect(mockAck).toHaveBeenCalledWith(expect.anything(), 42);
+    });
+
+    it('SNAPSHOT_EXPIRED → statut reste SNAPSHOT_REQUIRED', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { GeststockError } = await import('@/lib/geststock-client');
+      const client = {
+        getCatalogChanges: vi.fn(async () => { throw new Error('ne doit pas être appelé'); }),
+        acknowledgeChanges: vi.fn(),
+        getSnapshot: vi.fn(async () => { throw new GeststockError('SNAPSHOT_EXPIRED'); }),
+      } as unknown as GeststockClient;
+      const service = new CatalogConsumerService(client);
+      await service.consume(input(shopId));
+      expect((await SyncState.findOne({ linkId }).lean())?.status).toBe('SNAPSHOT_REQUIRED');
+    });
+
+    it('503 UNAVAILABLE durant l\'instantané → SNAPSHOT_REQUIRED + nextAttemptAt', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { GeststockError } = await import('@/lib/geststock-client');
+      const client = {
+        getCatalogChanges: vi.fn(async () => { throw new Error('ne doit pas être appelé'); }),
+        acknowledgeChanges: vi.fn(),
+        getSnapshot: vi.fn(async () => { throw new GeststockError('UNAVAILABLE'); }),
+      } as unknown as GeststockClient;
+      const service = new CatalogConsumerService(client);
+      await service.consume(input(shopId));
+      const state = await SyncState.findOne({ linkId }).lean();
+      expect(state?.status).toBe('SNAPSHOT_REQUIRED');
+      expect(state?.nextAttemptAt).toBeInstanceOf(Date);
+    });
+
+    it('LINK_REVOKED durant l\'instantané → état sync supprimé, révocation locale', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { GeststockError } = await import('@/lib/geststock-client');
+      const mockRevoke = vi.fn(async () => {});
+      const linkRevoker: LinkRevoker = { revoke: mockRevoke };
+      const client = {
+        getCatalogChanges: vi.fn(async () => { throw new Error('ne doit pas être appelé'); }),
+        acknowledgeChanges: vi.fn(),
+        getSnapshot: vi.fn(async () => { throw new GeststockError('LINK_REVOKED'); }),
+      } as unknown as GeststockClient;
+      const service = new CatalogConsumerService(client, linkRevoker);
+      await service.consume(input(shopId));
+      expect(mockRevoke).toHaveBeenCalledWith(shopId, linkId, null, expect.any(Date));
+      expect(await SyncState.findOne({ linkId }).lean()).toBeNull();
+    });
+
+    it('LINK_SUSPENDED durant l\'instantané → statut PAUSED', async () => {
+      const shopId = await createShopId();
+      const { linkId, input } = makeTest();
+      await SyncState.create({ linkId, after: 0, acknowledgedSeq: 0, status: 'SNAPSHOT_REQUIRED' });
+      const { GeststockError } = await import('@/lib/geststock-client');
+      const client = {
+        getCatalogChanges: vi.fn(async () => { throw new Error('ne doit pas être appelé'); }),
+        acknowledgeChanges: vi.fn(),
+        getSnapshot: vi.fn(async () => { throw new GeststockError('REJECTED', { status: 403, code: 'LINK_SUSPENDED' }); }),
+      } as unknown as GeststockClient;
+      const service = new CatalogConsumerService(client);
+      await service.consume(input(shopId));
+      expect((await SyncState.findOne({ linkId }).lean())?.status).toBe('PAUSED');
     });
   });
 });

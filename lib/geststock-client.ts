@@ -81,7 +81,9 @@ export type GeststockErrorKind =
   /** 409 CURSOR_AHEAD : `after` dépasse le dernier seq attribué ; arrêt de la synchronisation. */
   | 'CURSOR_AHEAD'
   /** 410 CURSOR_EXPIRED : `after` est sous le repère de purge ; reprise depuis l'instantané. */
-  | 'CURSOR_EXPIRED';
+  | 'CURSOR_EXPIRED'
+  /** 410 SNAPSHOT_EXPIRED : jeton de page d'instantané expiré (24 h) ; reprendre depuis la première page. */
+  | 'SNAPSHOT_EXPIRED';
 
 const MESSAGES: Record<GeststockErrorKind, string> = {
   INVALID_CLIENT: 'GestStock refuse les identifiants du client JeCréeMaBoutique (configuration).',
@@ -97,6 +99,7 @@ const MESSAGES: Record<GeststockErrorKind, string> = {
   REJECTED: 'GestStock a refusé la requête.',
   CURSOR_AHEAD: 'Curseur en avance sur le flux GestStock : réinitialisation requise.',
   CURSOR_EXPIRED: "Curseur GestStock expiré : reprise depuis l'instantané.",
+  SNAPSHOT_EXPIRED: "Jeton de page d'instantané expiré (24 h) : reprendre depuis la première page.",
 };
 
 /** Erreur typée du client GestStock : message fixe, aucune valeur sensible. */
@@ -168,6 +171,23 @@ export interface CatalogChangeEvent {
   occurredAt: string;
   /** Absent pour les événements ARCHIVE. */
   data?: Record<string, unknown>;
+}
+
+/**
+ * Page de l'instantané complet du catalogue (`GET /catalog/snapshot`).
+ * Les sections sont servies dans l'ordre : CATEGORIES, PRODUCTS, PRODUCT_IMAGES, AVAILABILITY.
+ * Une page ne contient des éléments que d'une ou deux sections au plus (transition en fin de section).
+ */
+export interface SnapshotPage {
+  /** Seq de référence de l'instantané, fixe sur toutes les pages ; à utiliser comme `after` après l'instantané. */
+  asOfSeq: number;
+  /** Devise de l'entreprise (ISO 4217). */
+  currency: string;
+  categories: Record<string, unknown>[];
+  products: Record<string, unknown>[];
+  productImages: Record<string, unknown>[];
+  /** `null` sur la dernière page. */
+  nextPageToken: string | null;
 }
 
 /** Page de résultats de `GET /catalog/changes`. */
@@ -385,6 +405,44 @@ export class GeststockClient {
       items: page.items as CatalogChangeEvent[],
       hasMore: page.hasMore,
       lastSeq: page.lastSeq,
+    };
+  }
+
+  /**
+   * Page de l'instantané complet du catalogue (`GET /catalog/snapshot`, portée `catalog:read`).
+   * Les sections sont ordonnées : CATEGORIES → PRODUCTS → PRODUCT_IMAGES → AVAILABILITY.
+   * Appeler sans `pageToken` pour la première page, puis avec `nextPageToken` de la page précédente.
+   *
+   * @throws {@link GeststockError} `SNAPSHOT_EXPIRED` (410) si le jeton de page a expiré (> 24 h).
+   */
+  async getSnapshot(credentials: LinkCredentials, pageToken?: string): Promise<SnapshotPage> {
+    const params = new URLSearchParams();
+    if (pageToken !== undefined) params.set('pageToken', pageToken);
+    const qs = params.toString();
+    const result = await this.withLinkToken(
+      credentials,
+      (token) => ({ method: 'GET', headers: bearer(token) }),
+      `/catalog/snapshot${qs ? '?' + qs : ''}`
+    );
+    if (result.status === 410 && errorCode(result.body) === 'SNAPSHOT_EXPIRED') {
+      throw new GeststockError('SNAPSHOT_EXPIRED', { status: 410 });
+    }
+    if (result.status !== 200) throw linkFailure(result, credentials.linkId, this);
+    const page = result.body as {
+      asOfSeq?: unknown; currency?: unknown;
+      categories?: unknown; products?: unknown; productImages?: unknown;
+      nextPageToken?: unknown;
+    } | undefined;
+    if (typeof page?.asOfSeq !== 'number' || !Array.isArray(page?.categories) || !Array.isArray(page?.products)) {
+      throw protocol('GET /catalog/snapshot');
+    }
+    return {
+      asOfSeq: page.asOfSeq,
+      currency: typeof page.currency === 'string' ? page.currency : '',
+      categories: page.categories as Record<string, unknown>[],
+      products: page.products as Record<string, unknown>[],
+      productImages: Array.isArray(page.productImages) ? page.productImages as Record<string, unknown>[] : [],
+      nextPageToken: typeof page.nextPageToken === 'string' ? page.nextPageToken : null,
     };
   }
 

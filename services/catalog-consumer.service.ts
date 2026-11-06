@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type mongoose from 'mongoose';
 
-import type { CatalogChangeEvent, CatalogChangePage } from '@/lib/geststock-client';
+import type { CatalogChangeEvent, CatalogChangePage, SnapshotPage } from '@/lib/geststock-client';
 import { GeststockClient, GeststockError, LinkCredentials } from '@/lib/geststock-client';
 import { Logger } from '@/lib/logger';
 import { normalizeName } from '@/lib/normalize';
@@ -46,8 +46,8 @@ const RETRY_DELAY_MS = 5 * 60_000;
 /** Types dont le curseur avance sans traitement (lots futurs ou déjà gérés ailleurs). */
 const SKIP_TYPES = new Set(['PRODUCT_IMAGE', 'CHANNEL_PRICE', 'AVAILABILITY', 'ONLINE_ORDER_STATUS']);
 
-/** Statuts terminaux : aucun appel GestStock. */
-const TERMINAL_STATUSES = new Set(['CURSOR_AHEAD', 'SNAPSHOT_REQUIRED', 'PAUSED']);
+/** Statuts terminaux : aucun appel GestStock (hors SNAPSHOT_REQUIRED géré par consumeSnapshot). */
+const TERMINAL_STATUSES = new Set(['CURSOR_AHEAD', 'PAUSED']);
 
 export interface ConsumeInput {
   /** Identifiant de la liaison GestStock (UUID). */
@@ -110,6 +110,12 @@ export class CatalogConsumerService {
       // --- 2. Statuts terminaux → aucun appel GestStock -----------------------------------
       if (TERMINAL_STATUSES.has(acquired.status)) return;
       if (acquired.status === 'BLOCKED' && acquired.blockedReason === 'UNKNOWN_EVENT') return;
+
+      // --- 2b. Instantané requis (J8) → consumeSnapshot au lieu du flux -------------------
+      if (acquired.status === 'SNAPSHOT_REQUIRED') {
+        await this.consumeSnapshot(input, leaseOwner, state);
+        return;
+      }
 
       // --- 3. Backoff actif → trop tôt ----------------------------------------------------
       if (acquired.nextAttemptAt && acquired.nextAttemptAt > new Date()) return;
@@ -410,6 +416,174 @@ export class CatalogConsumerService {
         break;
     }
   }
+
+  // --- Instantané complet (J8) -----------------------------------------------------------
+
+  /**
+   * Consomme l'instantané complet du catalogue (`GET /catalog/snapshot`) quand
+   * le statut est SNAPSHOT_REQUIRED. Les sections sont ordonnées CATEGORIES → PRODUCTS :
+   * les catégories sont garanties présentes quand les produits arrivent.
+   *
+   * Après l'instantané : réconciliation (produits GestStock absents → `inStock=false`),
+   * curseur posé à `asOfSeq`, statut IDLE, accusé de réception envoyé.
+   */
+  private async consumeSnapshot(
+    input: ConsumeInput,
+    leaseOwner: string,
+    state: { after: number; acknowledgedSeq: number },
+  ): Promise<void> {
+    // Statut SYNCING pendant l'instantané
+    await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+      $set: { status: 'SYNCING', nextAttemptAt: null },
+    });
+
+    const seenCategoryIds = new Set<string>();
+    const seenProductIds  = new Set<string>();
+    let pageToken: string | undefined;
+    let asOfSeq: number | undefined;
+
+    while (true) {
+      let page: SnapshotPage;
+      try {
+        page = await this.client.getSnapshot(input.credentials, pageToken);
+      } catch (err) {
+        await this.handleSnapshotError(input, err, leaseOwner);
+        return;
+      }
+
+      if (asOfSeq === undefined) asOfSeq = page.asOfSeq;
+
+      // Catégories en premier (garanties avant les produits par l'ordre des sections GestStock)
+      for (const item of page.categories) {
+        const id = typeof item.id === 'string' ? item.id : '';
+        if (id) seenCategoryIds.add(id);
+        try {
+          await this.applyCategory(input.shopId, snapshotItemToEvent('CATEGORY', item));
+        } catch (err) {
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, instantané CATEGORY ${id} : erreur d'application (${(err as Error)?.message ?? err}).`);
+        }
+      }
+
+      // Produits
+      for (const item of page.products) {
+        const id = typeof item.id === 'string' ? item.id : '';
+        if (id) seenProductIds.add(id);
+        const result = await this.applyProductUpsert(input.shopId, snapshotItemToEvent('PRODUCT', item));
+        if (result === 'MISSING_CATEGORY') {
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId}, instantané PRODUCT ${id} : catégorie externe introuvable, ignoré (J11).`);
+        }
+      }
+
+      // Renouveler le bail avant la prochaine page
+      await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+        $set: { leaseUntil: new Date(Date.now() + LEASE_DURATION_MS) },
+      });
+
+      if (!page.nextPageToken) break;
+      pageToken = page.nextPageToken;
+    }
+
+    // Réconciliation : produits GestStock absents de l'instantané → masquer
+    if (seenProductIds.size > 0) {
+      await Product.updateMany(
+        {
+          shopId: input.shopId,
+          'external.source': 'geststock',
+          'external.id': { $nin: Array.from(seenProductIds) },
+          inStock: true,
+        },
+        { $set: { inStock: false } }
+      );
+    }
+
+    // Curseur posé à asOfSeq ; accusé de réception
+    const finalSeq = asOfSeq ?? 0;
+    await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+      $set: { after: finalSeq, status: 'IDLE' },
+    });
+    state.after = finalSeq;
+
+    if (finalSeq > state.acknowledgedSeq) {
+      try {
+        await this.client.acknowledgeChanges(input.credentials, finalSeq);
+        await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+          $set: { acknowledgedSeq: finalSeq },
+        });
+      } catch (err) {
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : accusé de réception (instantané) échoué (${(err as Error)?.message ?? err}), réessai au prochain cycle.`);
+      }
+    }
+  }
+
+  /**
+   * Gestion des erreurs lors de la consommation de l'instantané.
+   * Les erreurs transitoires laissent le statut SNAPSHOT_REQUIRED pour relance.
+   */
+  private async handleSnapshotError(input: ConsumeInput, err: unknown, leaseOwner: string): Promise<void> {
+    if (!(err instanceof GeststockError)) {
+      Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : erreur inattendue durant l'instantané (${(err as Error)?.message ?? err}).`);
+      await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+        $set: { status: 'SNAPSHOT_REQUIRED', nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS) },
+      });
+      return;
+    }
+
+    switch (err.kind) {
+      case 'SNAPSHOT_EXPIRED':
+        // Jeton de page expiré (> 24 h) : reprendre depuis la page 1 au prochain cycle
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : jeton d'instantané expiré, reprise au prochain cycle.`);
+        await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, { $set: { status: 'SNAPSHOT_REQUIRED' } });
+        break;
+
+      case 'LINK_REVOKED':
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : LINK_REVOKED (instantané), révocation locale.`);
+        await this.linkRevoker.revoke(input.shopId, input.linkId, null, new Date());
+        await SyncState.deleteOne({ linkId: input.linkId });
+        break;
+
+      case 'REJECTED':
+        if (err.details.code === 'LINK_SUSPENDED' || err.details.code === 'COMPANY_SUSPENDED') {
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : ${err.details.code} (instantané), mise en pause.`);
+          await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, { $set: { status: 'PAUSED' } });
+        } else {
+          Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : REJECTED (instantané, ${err.details.status}, ${err.details.code}).`);
+          await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+            $set: { status: 'SNAPSHOT_REQUIRED', nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS) },
+          });
+        }
+        break;
+
+      case 'RATE_LIMITED': {
+        const delay = (err.details.retryAfterSeconds ?? 60) * 1000;
+        const nextAttemptAt = new Date(Date.now() + delay);
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : 429 (instantané), réessai à ${nextAttemptAt.toISOString()}.`);
+        await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+          $set: { status: 'SNAPSHOT_REQUIRED', nextAttemptAt },
+        });
+        break;
+      }
+
+      default:
+        Logger.warn(`Consommateur GestStock — liaison ${input.linkId} : ${err.kind} (instantané), réessai différé.`);
+        await SyncState.updateOne({ linkId: input.linkId, leaseOwner }, {
+          $set: { status: 'SNAPSHOT_REQUIRED', nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS) },
+        });
+        break;
+    }
+  }
+}
+
+/** Convertit un élément d'instantané en événement UPSERT pour les fonctions d'application. */
+function snapshotItemToEvent(type: string, item: Record<string, unknown>): CatalogChangeEvent {
+  return {
+    seq: 0,
+    type,
+    objectId: typeof item.id === 'string' ? item.id : '',
+    version: typeof item.version === 'number' ? item.version : 0,
+    operation: 'UPSERT',
+    occurredAt: new Date().toISOString(),
+    data: item,
+  };
 }
 
 /** Instance partagée (utilise le client GestStock singleton du service de liaison). */

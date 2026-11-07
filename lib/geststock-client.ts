@@ -534,6 +534,50 @@ export class GeststockClient {
     throw linkFailure(httpResult, credentials.linkId, this);
   }
 
+  // --- Rotation du secret (G14, J12.2) -------------------------------------------------------------------------
+
+  /**
+   * Initiation de la rotation du secret (`POST /link/secret/rotate`, G14) : GestStock génère un nouveau secret
+   * et le renvoie en clair — à chiffrer immédiatement par l'appelant.
+   */
+  async initiateSecretRotation(credentials: LinkCredentials): Promise<{ newSecret: string }> {
+    const result = await this.withLinkToken(
+      credentials,
+      (token) => ({ method: 'POST', headers: bearer(token) }),
+      '/link/secret/rotate',
+    );
+    if (result.status !== 200) throw linkFailure(result, credentials.linkId, this);
+    const body = result.body as { newSecret?: unknown } | undefined;
+    if (typeof body?.newSecret !== 'string' || !body.newSecret) throw protocol('POST /link/secret/rotate');
+    return { newSecret: body.newSecret };
+  }
+
+  /**
+   * Validation de la rotation (`POST /link/secret/rotate/commit`, G14) : GestStock invalide l'ancien secret
+   * et active le nouveau. Appeler avec les identifiants courants (ancien secret) ; invalider le jeton ensuite.
+   */
+  async commitSecretRotation(credentials: LinkCredentials): Promise<void> {
+    const result = await this.withLinkToken(
+      credentials,
+      (token) => ({ method: 'POST', headers: bearer(token) }),
+      '/link/secret/rotate/commit',
+    );
+    if (result.status !== 200 && result.status !== 204) throw linkFailure(result, credentials.linkId, this);
+  }
+
+  /**
+   * Annulation de la rotation en attente (`DELETE /link/secret/rotate`, G14) : GestStock supprime le secret
+   * en attente ; aucune modification du secret actif.
+   */
+  async cancelSecretRotation(credentials: LinkCredentials): Promise<void> {
+    const result = await this.withLinkToken(
+      credentials,
+      (token) => ({ method: 'DELETE', headers: bearer(token) }),
+      '/link/secret/rotate',
+    );
+    if (result.status !== 200 && result.status !== 204) throw linkFailure(result, credentials.linkId, this);
+  }
+
   /** Appel avec le jeton de la liaison ; un 401 INVALID_TOKEN l'invalide et l'appel est refait une seule fois. */
   private async withLinkToken(credentials: LinkCredentials, init: (token: string) => RequestInit, path: string): Promise<HttpResult> {
     const config = clientConfig();

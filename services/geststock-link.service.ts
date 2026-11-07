@@ -265,6 +265,66 @@ export async function revokeGeststockLink(shopId: string, reason?: string): Prom
   return { link: shopView(revoked ?? (await linkRepository.findByLinkId(shopId, link.linkId))), revoked: true };
 }
 
+// --- Rotation du secret (G14, J12.2) -------------------------------------------------------------------
+
+/**
+ * Initiation de la rotation du secret GestStock (G14) : GestStock génère un nouveau secret, que nous
+ * chiffrons et enregistrons comme secret en attente. La liaison reste active pendant la transition.
+ */
+export async function initiateSecretRotation(shopId: string): Promise<{ link: ShopLinkView | null }> {
+  const link = await linkRepository.findCurrentByShop(shopId);
+  if (!link) throw new GeststockRouteError(404, 'LINK_NOT_FOUND', 'Aucune liaison GestStock active.');
+  let newSecret: string;
+  try {
+    ({ newSecret } = await geststockClient.initiateSecretRotation(credentials(shopId, link.linkId)));
+  } catch (error) {
+    throw fromGeststock(error, 'initiation de la rotation du secret');
+  }
+  const updated = await linkRepository.storePendingSecret(shopId, link.linkId, newSecret);
+  Logger.info(`Rotation du secret de la liaison GestStock ${link.linkId} initiée.`, { shopId });
+  return { link: shopView(updated) };
+}
+
+/**
+ * Validation de la rotation du secret (G14) : GestStock invalide l'ancien secret. Localement, le secret
+ * en attente remplace l'actif et le jeton en cache est invalidé (prochain appel utilise le nouveau secret).
+ */
+export async function commitSecretRotation(shopId: string): Promise<{ link: ShopLinkView | null }> {
+  const link = await linkRepository.findCurrentByShop(shopId);
+  if (!link) throw new GeststockRouteError(404, 'LINK_NOT_FOUND', 'Aucune liaison GestStock active.');
+  if (!link.pendingSecretCreatedAt) {
+    throw new GeststockRouteError(409, 'NO_PENDING_ROTATION', 'Aucune rotation de secret en cours.');
+  }
+  try {
+    await geststockClient.commitSecretRotation(credentials(shopId, link.linkId));
+  } catch (error) {
+    throw fromGeststock(error, 'validation de la rotation du secret');
+  }
+  const updated = await linkRepository.commitPendingSecret(shopId, link.linkId);
+  geststockClient.invalidateLinkToken(link.linkId);
+  Logger.info(`Secret de la liaison GestStock ${link.linkId} validé (rotation).`, { shopId });
+  return { link: shopView(updated) };
+}
+
+/**
+ * Annulation de la rotation du secret (G14) : si une rotation était en cours, GestStock supprime le secret
+ * en attente. Localement, les champs pending sont effacés dans tous les cas.
+ */
+export async function cancelSecretRotation(shopId: string): Promise<{ link: ShopLinkView | null }> {
+  const link = await linkRepository.findCurrentByShop(shopId);
+  if (!link) throw new GeststockRouteError(404, 'LINK_NOT_FOUND', 'Aucune liaison GestStock active.');
+  if (link.pendingSecretCreatedAt) {
+    try {
+      await geststockClient.cancelSecretRotation(credentials(shopId, link.linkId));
+    } catch (error) {
+      throw fromGeststock(error, 'annulation de la rotation du secret');
+    }
+  }
+  const updated = await linkRepository.clearPendingSecret(shopId, link.linkId);
+  Logger.info(`Rotation du secret de la liaison GestStock ${link.linkId} annulée.`, { shopId });
+  return { link: shopView(updated) };
+}
+
 // --- Outils --------------------------------------------------------------------------------------------
 
 /** Identifiants de la liaison : secret déchiffré seulement si un nouveau jeton est nécessaire. */

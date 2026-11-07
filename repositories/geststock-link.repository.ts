@@ -185,6 +185,59 @@ export class GeststockLinkRepository {
     return this.revokeAt(shopId, linkId, reason, revokedAt, null);
   }
 
+  // --- Rotation du secret (G14, J12.2) -----------------------------------------------------------------------
+
+  /**
+   * Enregistre le nouveau secret en attente de rotation, chiffré avant tout stockage (J1). La clé AAD est
+   * la même que pour `encryptedSecret` (liaison + boutique). `null` si liaison introuvable ou révoquée.
+   */
+  async storePendingSecret(shopId: string, linkId: string, plainSecret: string): Promise<GeststockLinkView | null> {
+    if (!mongoose.isValidObjectId(shopId)) return null;
+    const shopOid = objectId(shopId);
+    const encryptedPending = encryptLinkSecret(plainSecret, { linkId, shopId });
+    const updated = await this.model
+      .findOneAndUpdate(
+        { shopId: shopOid, linkId, status: NOT_REVOKED },
+        { $set: { pendingEncryptedSecret: encryptedPending, pendingSecretCreatedAt: new Date() } },
+        { new: true },
+      )
+      .lean<StoredLink>();
+    return updated ? view(updated) : null;
+  }
+
+  /**
+   * Valide la rotation : remplace `encryptedSecret` par `pendingEncryptedSecret` de façon atomique
+   * (pipeline d'agrégation MongoDB 4.2+), puis efface les champs pending. `null` si aucune rotation
+   * en cours (pendingEncryptedSecret null) ou si la liaison est introuvable/révoquée.
+   */
+  async commitPendingSecret(shopId: string, linkId: string): Promise<GeststockLinkView | null> {
+    if (!mongoose.isValidObjectId(shopId)) return null;
+    const updated = await this.model
+      .findOneAndUpdate(
+        { shopId: objectId(shopId), linkId, status: NOT_REVOKED, pendingEncryptedSecret: { $ne: null } },
+        [{ $set: { encryptedSecret: '$pendingEncryptedSecret', pendingEncryptedSecret: null, pendingSecretCreatedAt: null } }],
+        { new: true },
+      )
+      .lean<StoredLink>();
+    return updated ? view(updated) : null;
+  }
+
+  /**
+   * Annule la rotation : efface `pendingEncryptedSecret` et `pendingSecretCreatedAt`. `null` si liaison
+   * introuvable ou révoquée.
+   */
+  async clearPendingSecret(shopId: string, linkId: string): Promise<GeststockLinkView | null> {
+    if (!mongoose.isValidObjectId(shopId)) return null;
+    const updated = await this.model
+      .findOneAndUpdate(
+        { shopId: objectId(shopId), linkId, status: NOT_REVOKED },
+        { $set: { pendingEncryptedSecret: null, pendingSecretCreatedAt: null } },
+        { new: true },
+      )
+      .lean<StoredLink>();
+    return updated ? view(updated) : null;
+  }
+
   private async revokeAt(
     shopId: string,
     linkId: string,

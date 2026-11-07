@@ -23,7 +23,7 @@ import { GeststockRouteError } from '@/services/geststock-link.service';
 
 export interface GeststockRouteOptions {
   /** Nom de la route (clé du limiteur, journaux). */
-  name: 'start' | 'complete' | 'link' | 'revoke';
+  name: 'start' | 'complete' | 'link' | 'revoke' | 'unmatched' | 'match-category' | 'rotate-secret';
   maxHits: number;
   windowMs: number;
   /** Démarrer et terminer : boutique approuvée exigée. */

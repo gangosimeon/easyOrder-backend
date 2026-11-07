@@ -15,6 +15,8 @@ export interface IUser extends Document {
   isActive: boolean;
   /** Suspension par un administrateur — distinct de isActive (visibilité publique / approbation). */
   banned: boolean;
+  /** Accès à la liaison GestStock accordé par un administrateur. */
+  geststockEnabled: boolean;
   /** Incrémentée à la déconnexion et au changement de mot de passe pour révoquer instantanément tous les access tokens déjà émis. */
   tokenVersion: number;
   refreshTokens: { tokenHash: string; expiresAt: Date }[];
@@ -48,6 +50,7 @@ const userSchema = new Schema<IUser>(
     role:        { type: String, enum: ['admin', 'user'], default: 'user' },
     isActive:    { type: Boolean, default: true },
     banned:      { type: Boolean, default: false },
+    geststockEnabled: { type: Boolean, default: false },
     tokenVersion: { type: Number, default: 0 },
     refreshTokens: {
       type: [{

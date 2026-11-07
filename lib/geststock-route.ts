@@ -47,17 +47,18 @@ export async function geststockRoute(
     await connectDB();
     const auth = await getAuthUser(req);
     if (!auth) return failure(401, 'UNAUTHENTICATED', 'Non authentifié');
-    const user = await User.findById(auth.userId).select('role isActive banned name').lean<{
+    const user = await User.findById(auth.userId).select('role isActive banned geststockEnabled name').lean<{
       role: string;
       isActive?: boolean;
       banned?: boolean;
+      geststockEnabled?: boolean;
       name: string;
     }>();
     if (!user) return failure(401, 'UNAUTHENTICATED', 'Non authentifié');
     if (auth.role === 'admin' || user.role === 'admin') {
       return failure(403, 'ADMIN_FORBIDDEN', 'La liaison GestStock est réservée aux boutiques.');
     }
-    if (options.requireEligibleShop && (user.isActive === false || user.banned === true)) {
+    if (options.requireEligibleShop && (user.geststockEnabled !== true || user.banned === true)) {
       return failure(403, 'SHOP_NOT_ELIGIBLE', 'Votre boutique doit être approuvée pour être liée à GestStock.');
     }
 

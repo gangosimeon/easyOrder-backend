@@ -24,6 +24,7 @@ export interface AdminShopDTO {
   status:       'active' | 'inactive';
   isActive:     boolean;
   banned:       boolean;
+  geststockEnabled: boolean;
   publicUrl:    string;
 }
 
@@ -65,6 +66,7 @@ function toDTO(shop: Record<string, unknown>, baseUrl: string): AdminShopDTO {
     status:       (shop.status as 'active' | 'inactive') ?? 'inactive',
     isActive:     shop.isActive !== false,
     banned:       shop.banned === true,
+    geststockEnabled: shop.geststockEnabled === true,
     publicUrl:    `${baseUrl}/shop/${String(shop.slug ?? '')}`,
   };
 }

@@ -27,17 +27,17 @@ const nextConfig = {
 
     return [
       // ── CORS pour les routes API ────────────────────────────────────────────
-      {
-        source: '/api/:path*',
-        headers: [
-          { key: 'Access-Control-Allow-Origin',      value: frontendUrl },
-          { key: 'Access-Control-Allow-Methods',     value: 'GET,POST,PUT,PATCH,DELETE,OPTIONS' },
-          { key: 'Access-Control-Allow-Headers',     value: 'Content-Type,Authorization' },
-          { key: 'Access-Control-Allow-Credentials', value: 'true' },
-          // Délai d'un 429 lisible par l'écran Angular (autre origine) : intégration GestStock, J5.
-          { key: 'Access-Control-Expose-Headers',    value: 'Retry-After' },
-        ],
-      },
+      // {
+      //   source: '/api/:path*',
+      //   headers: [
+      //     { key: 'Access-Control-Allow-Origin',      value: frontendUrl },
+      //     { key: 'Access-Control-Allow-Methods',     value: 'GET,POST,PUT,PATCH,DELETE,OPTIONS' },
+      //     { key: 'Access-Control-Allow-Headers',     value: 'Content-Type,Authorization' },
+      //     { key: 'Access-Control-Allow-Credentials', value: 'true' },
+      //     // Délai d'un 429 lisible par l'écran Angular (autre origine) : intégration GestStock, J5.
+      //     { key: 'Access-Control-Expose-Headers',    value: 'Retry-After' },
+      //   ],
+      // },
 
       // ── Cache CDN long pour les images OG ──────────────────────────────────
       {
